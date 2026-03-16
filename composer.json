@@ -1,0 +1,46 @@
+{
+    "name": "sebastian/laravel-permissions-redis",
+    "description": "A Redis-powered roles and permissions package for Laravel designed to eliminate repetitive database queries and deliver high-performance authorization.",
+    "type": "library",
+    "require": {
+        "php": "^8.2",
+        "illuminate/support": "^11.0|^12.0"
+    },
+    "require-dev": {
+        "pestphp/pest": "^4.4",
+        "phpstan/phpstan": "^2.1",
+        "larastan/larastan": "^3.9",
+        "laravel/pint": "^1.29"
+    },
+    "license": "MIT",
+    "keywords": ["laravel", "permissions", "roles", "redis", "performance"],
+    "autoload": {
+        "psr-4": {
+            "Sebastian\\LaravelPermissionsRedis\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Sebastian\\LaravelPermissionsRedis\\Tests\\": "tests/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Sebastian Cabarcas",
+            "email": "sebastianberrio45@hotmail.com",
+            "role": "Developer"
+        }
+    ],
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "scripts": {
+        "test": "pest",
+        "format": "pint",
+        "analyse": "phpstan analyse"
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    }
+}
