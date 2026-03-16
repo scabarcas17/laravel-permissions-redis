@@ -32,7 +32,7 @@ jobs:
 
       - name: Run PHPStan
         run: vendor/bin/phpstan analyse
-	
+
       - name: Run tests
         run: vendor/bin/pest
 
