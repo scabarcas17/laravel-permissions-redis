@@ -4,6 +4,6 @@ includes:
 parameters:
     paths:
         - src/
-    level: 6
+    level: max
     ignoreErrors:
         - identifier: trait.unused

@@ -3,12 +3,12 @@
 declare(strict_types=1);
 
 use Illuminate\Http\Request;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
-use Sebastian\LaravelPermissionsRedis\Exceptions\UnauthorizedException;
-use Sebastian\LaravelPermissionsRedis\Middleware\PermissionMiddleware;
-use Sebastian\LaravelPermissionsRedis\Middleware\RoleMiddleware;
-use Sebastian\LaravelPermissionsRedis\Middleware\RoleOrPermissionMiddleware;
-use Sebastian\LaravelPermissionsRedis\Tests\Fixtures\User;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
+use Scabarcas\LaravelPermissionsRedis\Exceptions\UnauthorizedException;
+use Scabarcas\LaravelPermissionsRedis\Middleware\PermissionMiddleware;
+use Scabarcas\LaravelPermissionsRedis\Middleware\RoleMiddleware;
+use Scabarcas\LaravelPermissionsRedis\Middleware\RoleOrPermissionMiddleware;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 function makeRequestWithUser(?User $user = null): Request
 {

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Sebastian\LaravelPermissionsRedis\Exceptions\UnauthorizedException;
+use Scabarcas\LaravelPermissionsRedis\Exceptions\UnauthorizedException;
 
 test('forPermissions creates 403 with permissions list', function () {
     $exception = UnauthorizedException::forPermissions(['users.create', 'users.edit']);
@@ -31,10 +31,10 @@ test('forRolesOrPermissions creates 403 with combined list', function () {
         ->and($exception->getRequiredItems())->toBe(['admin', 'users.create']);
 });
 
-test('notLoggedIn creates 403 with authentication message', function () {
+test('notLoggedIn creates 401 with authentication message', function () {
     $exception = UnauthorizedException::notLoggedIn();
 
-    expect($exception->getStatusCode())->toBe(403)
+    expect($exception->getStatusCode())->toBe(401)
         ->and($exception->getMessage())->toContain('not authenticated')
         ->and($exception->getRequiredItems())->toBe([]);
 });

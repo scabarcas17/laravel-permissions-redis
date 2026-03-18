@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
-use Sebastian\LaravelPermissionsRedis\Models\Permission;
-use Sebastian\LaravelPermissionsRedis\Models\Role;
+use Scabarcas\LaravelPermissionsRedis\Models\Permission;
+use Scabarcas\LaravelPermissionsRedis\Models\Role;
 
 test('Permission model uses configurable table name', function () {
     $permission = new Permission();
@@ -14,10 +14,10 @@ test('Permission model uses configurable table name', function () {
 
 test('Permission model creates and retrieves correctly', function () {
     $permission = Permission::create([
-        'name' => 'users.create',
+        'name'        => 'users.create',
         'description' => 'Create users',
-        'group' => 'users',
-        'guard_name' => 'web',
+        'group'       => 'users',
+        'guard_name'  => 'web',
     ]);
 
     expect($permission)->toBeInstanceOf(Permission::class)
@@ -37,9 +37,9 @@ test('Role model uses configurable table name', function () {
 
 test('Role model creates and retrieves correctly', function () {
     $role = Role::create([
-        'name' => 'admin',
+        'name'        => 'admin',
         'description' => 'Administrator',
-        'guard_name' => 'web',
+        'guard_name'  => 'web',
     ]);
 
     expect($role)->toBeInstanceOf(Role::class)

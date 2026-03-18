@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
-use Sebastian\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
-use Sebastian\LaravelPermissionsRedis\Events\RolesAssigned;
-use Sebastian\LaravelPermissionsRedis\Models\Permission;
-use Sebastian\LaravelPermissionsRedis\Models\Role;
-use Sebastian\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
-use Sebastian\LaravelPermissionsRedis\Tests\Fixtures\User;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
+use Scabarcas\LaravelPermissionsRedis\Models\Permission;
+use Scabarcas\LaravelPermissionsRedis\Models\Role;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 beforeEach(function () {
     $this->repo = new InMemoryPermissionRepository();
@@ -41,8 +41,8 @@ beforeEach(function () {
 
     // Set up user -> role in DB
     DB::table('model_has_roles')->insert([
-        'role_id' => $this->adminRole->id,
-        'model_id' => $this->user->id,
+        'role_id'    => $this->adminRole->id,
+        'model_id'   => $this->user->id,
         'model_type' => User::class,
     ]);
 
@@ -99,8 +99,8 @@ test('hasAnyRole returns false when none match', function () {
 test('hasAllRoles returns true when all match', function () {
     // Add editor role too
     DB::table('model_has_roles')->insert([
-        'role_id' => $this->editorRole->id,
-        'model_id' => $this->user->id,
+        'role_id'    => $this->editorRole->id,
+        'model_id'   => $this->user->id,
         'model_type' => User::class,
     ]);
     app(AuthorizationCacheManager::class)->warmUser($this->user->id);
@@ -140,8 +140,8 @@ test('assignRole persists role in database and dispatches event', function () {
     $this->user->assignRole('editor');
 
     $this->assertDatabaseHas('model_has_roles', [
-        'role_id' => $this->editorRole->id,
-        'model_id' => $this->user->id,
+        'role_id'    => $this->editorRole->id,
+        'model_id'   => $this->user->id,
         'model_type' => User::class,
     ]);
 
@@ -154,12 +154,12 @@ test('syncRoles replaces all roles', function () {
     $this->user->syncRoles(['editor']);
 
     $this->assertDatabaseMissing('model_has_roles', [
-        'role_id' => $this->adminRole->id,
+        'role_id'  => $this->adminRole->id,
         'model_id' => $this->user->id,
     ]);
 
     $this->assertDatabaseHas('model_has_roles', [
-        'role_id' => $this->editorRole->id,
+        'role_id'  => $this->editorRole->id,
         'model_id' => $this->user->id,
     ]);
 });
@@ -170,7 +170,7 @@ test('removeRole detaches role from user', function () {
     $this->user->removeRole('admin');
 
     $this->assertDatabaseMissing('model_has_roles', [
-        'role_id' => $this->adminRole->id,
+        'role_id'  => $this->adminRole->id,
         'model_id' => $this->user->id,
     ]);
 });
@@ -182,8 +182,8 @@ test('givePermissionTo creates direct permission', function () {
 
     $this->assertDatabaseHas('model_has_permissions', [
         'permission_id' => $specialPerm->id,
-        'model_id' => $this->user->id,
-        'model_type' => User::class,
+        'model_id'      => $this->user->id,
+        'model_type'    => User::class,
     ]);
 });
 
@@ -195,7 +195,7 @@ test('revokePermissionTo removes direct permission', function () {
 
     $this->assertDatabaseMissing('model_has_permissions', [
         'permission_id' => $specialPerm->id,
-        'model_id' => $this->user->id,
+        'model_id'      => $this->user->id,
     ]);
 });
 
@@ -208,12 +208,12 @@ test('syncPermissions replaces all direct permissions', function () {
 
     $this->assertDatabaseMissing('model_has_permissions', [
         'permission_id' => $specialPerm->id,
-        'model_id' => $this->user->id,
+        'model_id'      => $this->user->id,
     ]);
 
     $this->assertDatabaseHas('model_has_permissions', [
         'permission_id' => $extraPerm->id,
-        'model_id' => $this->user->id,
+        'model_id'      => $this->user->id,
     ]);
 });
 

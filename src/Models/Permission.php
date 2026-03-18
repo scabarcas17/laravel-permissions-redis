@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Models;
+namespace Scabarcas\LaravelPermissionsRedis\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
@@ -19,6 +19,9 @@ class Permission extends Model
 
     public function getTable(): string
     {
-        return config('permissions-redis.tables.permissions', 'permissions');
+        /** @var string $table */
+        $table = config('permissions-redis.tables.permissions', 'permissions');
+
+        return $table;
     }
 }

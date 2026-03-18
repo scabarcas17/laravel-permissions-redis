@@ -2,17 +2,19 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Resolver;
+namespace Scabarcas\LaravelPermissionsRedis\Resolver;
 
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Log;
-use Sebastian\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
-use Sebastian\LaravelPermissionsRedis\DTO\PermissionDTO;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Concerns\LogsMessages;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
+use Scabarcas\LaravelPermissionsRedis\DTO\PermissionDTO;
 
 class PermissionResolver implements PermissionResolverInterface
 {
+    use LogsMessages;
+
     /** @var array<int, array<string, bool>> */
     private array $permissionCache = [];
 
@@ -124,20 +126,8 @@ class PermissionResolver implements PermissionResolverInterface
     private function ensureUserCacheExists(int $userId): void
     {
         if (!$this->repository->userCacheExists($userId)) {
-            $this->log("Auth cache miss for user {$userId}, warming from database.");
+            $this->log("Auth cache miss for user {$userId}, warming from database.", 'warning');
             $this->cacheManager->warmUser($userId);
-        }
-    }
-
-    private function log(string $message): void
-    {
-        /** @var string|null $channel */
-        $channel = config('permissions-redis.log_channel');
-
-        if ($channel !== null) {
-            Log::channel($channel)->warning($message);
-        } else {
-            Log::warning("[permissions-redis] {$message}");
         }
     }
 }

@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Middleware;
+namespace Scabarcas\LaravelPermissionsRedis\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
-use Sebastian\LaravelPermissionsRedis\Exceptions\UnauthorizedException;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
+use Scabarcas\LaravelPermissionsRedis\Exceptions\UnauthorizedException;
 use Symfony\Component\HttpFoundation\Response;
 
 class PermissionMiddleware
@@ -17,9 +17,7 @@ class PermissionMiddleware
     ) {
     }
 
-    /**
-     * @throws UnauthorizedException
-     */
+    /** @param Closure(Request): Response $next */
     public function handle(Request $request, Closure $next, string $permission, ?string $guard = null): Response
     {
         $user = $request->user($guard);

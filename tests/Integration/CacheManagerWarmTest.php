@@ -3,10 +3,10 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
-use Sebastian\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
-use Sebastian\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
-use Sebastian\LaravelPermissionsRedis\Tests\Fixtures\User;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 beforeEach(function () {
     $this->repo = new InMemoryPermissionRepository();
@@ -19,23 +19,23 @@ function seedDbData(): array
     $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
 
     $permId = DB::table('permissions')->insertGetId([
-        'name' => 'users.create',
+        'name'       => 'users.create',
         'guard_name' => 'web',
     ]);
 
     $roleId = DB::table('roles')->insertGetId([
-        'name' => 'admin',
+        'name'       => 'admin',
         'guard_name' => 'web',
     ]);
 
     DB::table('role_has_permissions')->insert([
-        'role_id' => $roleId,
+        'role_id'       => $roleId,
         'permission_id' => $permId,
     ]);
 
     DB::table('model_has_roles')->insert([
-        'role_id' => $roleId,
-        'model_id' => $user->id,
+        'role_id'    => $roleId,
+        'model_id'   => $user->id,
         'model_type' => User::class,
     ]);
 
@@ -55,14 +55,14 @@ test('warmUser includes direct permissions', function () {
     $data = seedDbData();
 
     $directPermId = DB::table('permissions')->insertGetId([
-        'name' => 'special.access',
+        'name'       => 'special.access',
         'guard_name' => 'web',
     ]);
 
     DB::table('model_has_permissions')->insert([
         'permission_id' => $directPermId,
-        'model_id' => $data['user']->id,
-        'model_type' => User::class,
+        'model_id'      => $data['user']->id,
+        'model_type'    => User::class,
     ]);
 
     $this->manager->warmUser($data['user']->id);
@@ -79,8 +79,8 @@ test('warmUser deduplicates permissions from roles and direct', function () {
     // Same permission assigned directly too
     DB::table('model_has_permissions')->insert([
         'permission_id' => $data['permId'],
-        'model_id' => $data['user']->id,
-        'model_type' => User::class,
+        'model_id'      => $data['user']->id,
+        'model_type'    => User::class,
     ]);
 
     $this->manager->warmUser($data['user']->id);
@@ -106,8 +106,8 @@ test('warmAll processes all roles and users', function () {
     $user2 = User::create(['name' => 'Jane', 'email' => 'jane@test.com']);
 
     DB::table('model_has_roles')->insert([
-        'role_id' => $data['roleId'],
-        'model_id' => $user2->id,
+        'role_id'    => $data['roleId'],
+        'model_id'   => $user2->id,
         'model_type' => User::class,
     ]);
 

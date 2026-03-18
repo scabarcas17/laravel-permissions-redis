@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-use Sebastian\LaravelPermissionsRedis\Events\PermissionsSynced;
-use Sebastian\LaravelPermissionsRedis\Events\RoleDeleted;
-use Sebastian\LaravelPermissionsRedis\Events\RolesAssigned;
-use Sebastian\LaravelPermissionsRedis\Events\UserDeleted;
-use Sebastian\LaravelPermissionsRedis\Models\Role;
-use Sebastian\LaravelPermissionsRedis\Tests\Fixtures\User;
+use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
+use Scabarcas\LaravelPermissionsRedis\Events\RoleDeleted;
+use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
+use Scabarcas\LaravelPermissionsRedis\Events\UserDeleted;
+use Scabarcas\LaravelPermissionsRedis\Models\Role;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 test('PermissionsSynced holds role model', function () {
     $role = new Role();

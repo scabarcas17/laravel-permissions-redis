@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Commands;
+namespace Scabarcas\LaravelPermissionsRedis\Commands;
 
 use Illuminate\Console\Command;
-use Sebastian\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 
 class WarmCacheCommand extends Command
 {

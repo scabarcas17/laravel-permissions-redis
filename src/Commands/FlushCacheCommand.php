@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Commands;
+namespace Scabarcas\LaravelPermissionsRedis\Commands;
 
 use Illuminate\Console\Command;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 
 class FlushCacheCommand extends Command
 {

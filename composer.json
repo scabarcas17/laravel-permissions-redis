@@ -1,5 +1,5 @@
 {
-    "name": "sebastian/laravel-permissions-redis",
+    "name": "scabarcas/laravel-permissions-redis",
     "description": "A Redis-powered roles and permissions package for Laravel designed to eliminate repetitive database queries and deliver high-performance authorization.",
     "type": "library",
     "require": {
@@ -22,12 +22,12 @@
     "keywords": ["laravel", "permissions", "roles", "redis", "performance", "cache", "authorization"],
     "autoload": {
         "psr-4": {
-            "Sebastian\\LaravelPermissionsRedis\\": "src/"
+            "Scabarcas\\LaravelPermissionsRedis\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Sebastian\\LaravelPermissionsRedis\\Tests\\": "tests/"
+            "Scabarcas\\LaravelPermissionsRedis\\Tests\\": "tests/"
         }
     },
     "authors": [
@@ -52,7 +52,7 @@
     "extra": {
         "laravel": {
             "providers": [
-                "Sebastian\\LaravelPermissionsRedis\\PermissionsRedisServiceProvider"
+                "Scabarcas\\LaravelPermissionsRedis\\PermissionsRedisServiceProvider"
             ]
         }
     }

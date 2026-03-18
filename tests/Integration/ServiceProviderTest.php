@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-use Sebastian\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
-use Sebastian\LaravelPermissionsRedis\Cache\RedisPermissionRepository;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
-use Sebastian\LaravelPermissionsRedis\Resolver\PermissionResolver;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Cache\RedisPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
+use Scabarcas\LaravelPermissionsRedis\Resolver\PermissionResolver;
 
 test('binds PermissionRepositoryInterface to RedisPermissionRepository', function () {
     $instance = app(PermissionRepositoryInterface::class);
@@ -27,9 +27,9 @@ test('registers AuthorizationCacheManager as singleton', function () {
     expect($a)->toBe($b);
 });
 
-test('registers PermissionResolver as singleton', function () {
-    $a = app(PermissionResolver::class);
-    $b = app(PermissionResolver::class);
+test('registers PermissionResolver as singleton via interface', function () {
+    $a = app(PermissionResolverInterface::class);
+    $b = app(PermissionResolverInterface::class);
 
     expect($a)->toBe($b);
 });

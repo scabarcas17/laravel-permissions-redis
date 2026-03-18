@@ -2,25 +2,19 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Traits;
+namespace Scabarcas\LaravelPermissionsRedis\Traits;
 
 use BackedEnum;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Collection;
-use Sebastian\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
-use Sebastian\LaravelPermissionsRedis\Events\RolesAssigned;
-use Sebastian\LaravelPermissionsRedis\Models\Permission;
-use Sebastian\LaravelPermissionsRedis\Models\Role;
-use Sebastian\LaravelPermissionsRedis\Resolver\PermissionResolver;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
+use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
+use Scabarcas\LaravelPermissionsRedis\Models\Permission;
+use Scabarcas\LaravelPermissionsRedis\Models\Role;
 
 /**
- * Drop-in replacement for Spatie\Permission\Traits\HasRoles.
- *
- * Read methods resolve from Redis (zero DB queries).
- * Write methods persist to DB and dispatch events for cache invalidation.
- *
  * @mixin Model
  *
  * @property int $id
@@ -238,12 +232,7 @@ trait HasRedisPermissions
             ->withPivotValue('model_type', static::class);
     }
 
-    /**
-     * @param Builder $query
-     * @param string|int|array<string|int>          $roles
-     *
-     * @return Builder
-     */
+    /** @param string|int|array<string|int> $roles */
     public function scopeRole($query, mixed $roles, ?string $guard = null)
     {
         $roles = is_array($roles) ? $roles : [$roles];
@@ -264,12 +253,7 @@ trait HasRedisPermissions
         });
     }
 
-    /**
-     * @param Builder $query
-     * @param string|int|array<string|int>          $permissions
-     *
-     * @return Builder
-     */
+    /** @param string|int|array<string|int> $permissions */
     public function scopePermission($query, mixed $permissions, ?string $guard = null)
     {
         $permissions = is_array($permissions) ? $permissions : [$permissions];
@@ -285,17 +269,21 @@ trait HasRedisPermissions
             return $model->id;
         });
 
-        return $query->whereHas('roles', function ($q) use ($permissionIds) {
-            $q->whereHas('permissions', function ($q) use ($permissionIds) {
+        return $query->where(function ($q) use ($permissionIds) {
+            $q->whereHas('roles', function ($q) use ($permissionIds) {
+                $q->whereHas('permissions', function ($q) use ($permissionIds) {
+                    $q->whereIn('permissions.id', $permissionIds);
+                });
+            })->orWhereHas('permissions', function ($q) use ($permissionIds) {
                 $q->whereIn('permissions.id', $permissionIds);
             });
         });
     }
 
-    private function getPermissionResolver(): PermissionResolver
+    private function getPermissionResolver(): PermissionResolverInterface
     {
-        /** @var PermissionResolver $resolver */
-        $resolver = app(PermissionResolver::class);
+        /** @var PermissionResolverInterface $resolver */
+        $resolver = app(PermissionResolverInterface::class);
 
         return $resolver;
     }
@@ -331,8 +319,6 @@ trait HasRedisPermissions
     }
 
     /**
-     * @param array $permissions
-     *
      * @return array<int>
      */
     private function resolvePermissionIds(array $permissions): array
@@ -361,8 +347,6 @@ trait HasRedisPermissions
     }
 
     /**
-     * @param array $permissions
-     *
      * @return array<string>
      */
     private function flattenPermissions(array $permissions): array

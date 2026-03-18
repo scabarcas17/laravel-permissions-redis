@@ -2,23 +2,23 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Cache;
+namespace Scabarcas\LaravelPermissionsRedis\Cache;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Concerns\LogsMessages;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 
 class AuthorizationCacheManager
 {
+    use LogsMessages;
+
     public function __construct(
         private readonly PermissionRepositoryInterface $repository,
     ) {
     }
 
-    /**
-     * Warm the entire authorization cache from database.
-     */
     public function warmAll(): void
     {
         $this->repository->flushAll();
@@ -29,9 +29,6 @@ class AuthorizationCacheManager
         $this->log('Full authorization cache warm completed.');
     }
 
-    /**
-     * Recompute and warm a single user's permissions and roles cache.
-     */
     public function warmUser(int $userId): void
     {
         $permissions = $this->computeUserPermissions($userId);
@@ -41,9 +38,6 @@ class AuthorizationCacheManager
         $this->repository->setUserRoles($userId, $roles);
     }
 
-    /**
-     * Recompute and warm a single role's permissions cache and its user reverse index.
-     */
     public function warmRole(int $roleId): void
     {
         $permissions = $this->getRolePermissionNames($roleId);
@@ -53,27 +47,17 @@ class AuthorizationCacheManager
         $this->repository->setRoleUsers($roleId, $userIds);
     }
 
-    /**
-     * Remove all cache entries for a user.
-     */
     public function evictUser(int $userId): void
     {
         $this->repository->deleteUserCache($userId);
     }
 
-    /**
-     * Remove all cache entries for a role.
-     */
     public function evictRole(int $roleId): void
     {
         $this->repository->deleteRoleCache($roleId);
     }
 
-    /**
-     * Compute the full resolved permission set for a user (role-inherited + direct).
-     *
-     * @return array<string>
-     */
+    /** @return array<string> */
     private function computeUserPermissions(int $userId): array
     {
         $rolePermissions = $this->getUserRolePermissionNames($userId);
@@ -176,15 +160,13 @@ class AuthorizationCacheManager
      */
     private function getRoleUserIdsFromDb(int $roleId): array
     {
-        /** @var array<int> $rows */
-        $rows = DB::table($this->table('model_has_roles'))
+        /** @var Collection<int, int> $ids */
+        $ids = DB::table($this->table('model_has_roles'))
             ->where('role_id', $roleId)
             ->where('model_type', $this->userModelType())
-            ->pluck('model_id')
-            ->map(fn (mixed $id): int => (int) $id)
-            ->all();
+            ->pluck('model_id');
 
-        return $rows;
+        return $ids->all();
     }
 
     private function warmAllRoles(): void
@@ -199,7 +181,7 @@ class AuthorizationCacheManager
 
     private function warmAllUsers(): void
     {
-        /** @var string $userModel */
+        /** @var class-string<Model> $userModel */
         $userModel = config('permissions-redis.user_model', 'App\\Models\\User');
 
         $table = (new $userModel())->getTable();
@@ -226,17 +208,5 @@ class AuthorizationCacheManager
         $table = config("permissions-redis.tables.{$key}", $key);
 
         return $table;
-    }
-
-    private function log(string $message): void
-    {
-        /** @var string|null $channel */
-        $channel = config('permissions-redis.log_channel');
-
-        if ($channel !== null) {
-            Log::channel($channel)->info($message);
-        } else {
-            Log::info("[permissions-redis] {$message}");
-        }
     }
 }

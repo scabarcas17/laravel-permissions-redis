@@ -40,4 +40,4 @@ jobs:
         run: vendor/bin/pest
 
       - name: Run Pint
-        run: vendor/bin/pint
+        run: vendor/bin/pint --test

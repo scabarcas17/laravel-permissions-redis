@@ -2,22 +2,22 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Tests\Fixtures;
+namespace Scabarcas\LaravelPermissionsRedis\Tests\Fixtures;
 
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 
 class InMemoryPermissionRepository implements PermissionRepositoryInterface
 {
-    /** @var array<string, array<string>> */
+    /** @var array<int, array<string>> */
     private array $userPermissions = [];
 
-    /** @var array<string, array<string>> */
+    /** @var array<int, array<string>> */
     private array $userRoles = [];
 
-    /** @var array<string, array<string>> */
+    /** @var array<int, array<string>> */
     private array $rolePermissions = [];
 
-    /** @var array<string, array<int>> */
+    /** @var array<int, array<int>> */
     private array $roleUsers = [];
 
     public function userHasPermission(int $userId, string $permission): bool

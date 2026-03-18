@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Contracts;
+namespace Scabarcas\LaravelPermissionsRedis\Contracts;
 
 interface PermissionRepositoryInterface
 {

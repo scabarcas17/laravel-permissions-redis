@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Contracts;
+namespace Scabarcas\LaravelPermissionsRedis\Contracts;
 
 use Illuminate\Support\Collection;
-use Sebastian\LaravelPermissionsRedis\DTO\PermissionDTO;
+use Scabarcas\LaravelPermissionsRedis\DTO\PermissionDTO;
 
 interface PermissionResolverInterface
 {

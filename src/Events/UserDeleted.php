@@ -2,13 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Events;
+namespace Scabarcas\LaravelPermissionsRedis\Events;
 
 use Illuminate\Foundation\Events\Dispatchable;
 
-/**
- * Dispatched when a user is deleted.
- */
 class UserDeleted
 {
     use Dispatchable;

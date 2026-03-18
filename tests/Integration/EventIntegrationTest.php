@@ -3,17 +3,15 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Event;
-use Sebastian\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
-use Sebastian\LaravelPermissionsRedis\Events\PermissionsSynced;
-use Sebastian\LaravelPermissionsRedis\Events\RoleDeleted;
-use Sebastian\LaravelPermissionsRedis\Events\RolesAssigned;
-use Sebastian\LaravelPermissionsRedis\Events\UserDeleted;
-use Sebastian\LaravelPermissionsRedis\Listeners\CacheInvalidator;
-use Sebastian\LaravelPermissionsRedis\Models\Role;
-use Sebastian\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
-use Sebastian\LaravelPermissionsRedis\Tests\Fixtures\User;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
+use Scabarcas\LaravelPermissionsRedis\Events\RoleDeleted;
+use Scabarcas\LaravelPermissionsRedis\Events\UserDeleted;
+use Scabarcas\LaravelPermissionsRedis\Listeners\CacheInvalidator;
+use Scabarcas\LaravelPermissionsRedis\Models\Role;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 beforeEach(function () {
     $this->repo = new InMemoryPermissionRepository();
@@ -30,8 +28,8 @@ test('CacheInvalidator is registered as event subscriber', function () {
     $permId = DB::table('permissions')->insertGetId(['name' => 'test.perm', 'guard_name' => 'web']);
     DB::table('role_has_permissions')->insert(['role_id' => $role->id, 'permission_id' => $permId]);
     DB::table('model_has_roles')->insert([
-        'role_id' => $role->id,
-        'model_id' => $user->id,
+        'role_id'    => $role->id,
+        'model_id'   => $user->id,
         'model_type' => User::class,
     ]);
 
@@ -61,8 +59,8 @@ test('RoleDeleted event clears role cache and recomputes affected users', functi
 
     DB::table('role_has_permissions')->insert(['role_id' => $roleId, 'permission_id' => $permId]);
     DB::table('model_has_roles')->insert([
-        'role_id' => $roleId,
-        'model_id' => $user->id,
+        'role_id'    => $roleId,
+        'model_id'   => $user->id,
         'model_type' => User::class,
     ]);
 

@@ -3,9 +3,9 @@
 declare(strict_types=1);
 
 use Illuminate\Auth\Events\Login;
-use Sebastian\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
-use Sebastian\LaravelPermissionsRedis\Listeners\WarmCacheOnLogin;
-use Sebastian\LaravelPermissionsRedis\Tests\Fixtures\User;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Listeners\WarmCacheOnLogin;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 test('warms user cache on login event', function () {
     $user = new User();

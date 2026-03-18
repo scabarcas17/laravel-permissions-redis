@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-use Sebastian\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
-use Sebastian\LaravelPermissionsRedis\DTO\PermissionDTO;
-use Sebastian\LaravelPermissionsRedis\Resolver\PermissionResolver;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\DTO\PermissionDTO;
+use Scabarcas\LaravelPermissionsRedis\Resolver\PermissionResolver;
 
 beforeEach(function () {
     $this->repository = Mockery::mock(PermissionRepositoryInterface::class);

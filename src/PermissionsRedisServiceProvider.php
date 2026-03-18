@@ -2,27 +2,28 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis;
+namespace Scabarcas\LaravelPermissionsRedis;
 
 use Illuminate\Auth\Events\Login;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Container\BindingResolutionException;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
-use Sebastian\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
-use Sebastian\LaravelPermissionsRedis\Cache\RedisPermissionRepository;
-use Sebastian\LaravelPermissionsRedis\Commands\FlushCacheCommand;
-use Sebastian\LaravelPermissionsRedis\Commands\WarmCacheCommand;
-use Sebastian\LaravelPermissionsRedis\Commands\WarmUserCacheCommand;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
-use Sebastian\LaravelPermissionsRedis\Listeners\CacheInvalidator;
-use Sebastian\LaravelPermissionsRedis\Listeners\WarmCacheOnLogin;
-use Sebastian\LaravelPermissionsRedis\Middleware\PermissionMiddleware;
-use Sebastian\LaravelPermissionsRedis\Middleware\RoleMiddleware;
-use Sebastian\LaravelPermissionsRedis\Middleware\RoleOrPermissionMiddleware;
-use Sebastian\LaravelPermissionsRedis\Resolver\PermissionResolver;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Cache\RedisPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Commands\FlushCacheCommand;
+use Scabarcas\LaravelPermissionsRedis\Commands\WarmCacheCommand;
+use Scabarcas\LaravelPermissionsRedis\Commands\WarmUserCacheCommand;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
+use Scabarcas\LaravelPermissionsRedis\Listeners\CacheInvalidator;
+use Scabarcas\LaravelPermissionsRedis\Listeners\WarmCacheOnLogin;
+use Scabarcas\LaravelPermissionsRedis\Middleware\PermissionMiddleware;
+use Scabarcas\LaravelPermissionsRedis\Middleware\RoleMiddleware;
+use Scabarcas\LaravelPermissionsRedis\Middleware\RoleOrPermissionMiddleware;
+use Scabarcas\LaravelPermissionsRedis\Resolver\PermissionResolver;
 
 class PermissionsRedisServiceProvider extends ServiceProvider
 {
@@ -31,12 +32,8 @@ class PermissionsRedisServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__ . '/../config/permissions-redis.php', 'permissions-redis');
 
         $this->app->singleton(PermissionRepositoryInterface::class, RedisPermissionRepository::class);
-        $this->app->singleton(RedisPermissionRepository::class);
-
         $this->app->singleton(AuthorizationCacheManager::class);
-
         $this->app->singleton(PermissionResolverInterface::class, PermissionResolver::class);
-        $this->app->singleton(PermissionResolver::class);
     }
 
     /**
@@ -63,6 +60,8 @@ class PermissionsRedisServiceProvider extends ServiceProvider
 
     private function publishAssets(): void
     {
+        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__ . '/../config/permissions-redis.php' => config_path('permissions-redis.php'),
@@ -87,7 +86,7 @@ class PermissionsRedisServiceProvider extends ServiceProvider
 
     private function registerGateIntegration(): void
     {
-        Gate::before(function (mixed $user, string $ability): ?bool {
+        Gate::before(function (Authenticatable $user, string $ability): ?bool {
             /** @var string $userModel */
             $userModel = config('permissions-redis.user_model', 'App\\Models\\User');
 
@@ -95,10 +94,13 @@ class PermissionsRedisServiceProvider extends ServiceProvider
                 return null;
             }
 
-            /** @var PermissionResolver $resolver */
-            $resolver = app(PermissionResolver::class);
+            /** @var PermissionResolverInterface $resolver */
+            $resolver = app(PermissionResolverInterface::class);
 
-            if ($resolver->hasPermission($user->id, $ability)) {
+            /** @var int $userId */
+            $userId = $user->getAuthIdentifier();
+
+            if ($resolver->hasPermission($userId, $ability)) {
                 return true;
             }
 

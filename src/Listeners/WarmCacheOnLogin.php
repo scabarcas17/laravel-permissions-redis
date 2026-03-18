@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Listeners;
+namespace Scabarcas\LaravelPermissionsRedis\Listeners;
 
 use Illuminate\Auth\Events\Login;
 use Illuminate\Database\Eloquent\Model;
-use Sebastian\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 
 class WarmCacheOnLogin
 {
@@ -20,6 +20,9 @@ class WarmCacheOnLogin
         /** @var Model $user */
         $user = $event->user;
 
-        $this->cacheManager->warmUser((int) $user->getKey());
+        /** @var int $userId */
+        $userId = $user->getKey();
+
+        $this->cacheManager->warmUser($userId);
     }
 }

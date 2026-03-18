@@ -3,10 +3,10 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
-use Sebastian\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
-use Sebastian\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
-use Sebastian\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
-use Sebastian\LaravelPermissionsRedis\Tests\Fixtures\User;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 beforeEach(function () {
     $this->repo = new InMemoryPermissionRepository();
@@ -24,8 +24,8 @@ test('permissions-redis:warm warms all users and roles', function () {
 
     DB::table('role_has_permissions')->insert(['role_id' => $roleId, 'permission_id' => $permId]);
     DB::table('model_has_roles')->insert([
-        'role_id' => $roleId,
-        'model_id' => $user->id,
+        'role_id'    => $roleId,
+        'model_id'   => $user->id,
         'model_type' => User::class,
     ]);
 
@@ -46,8 +46,8 @@ test('permissions-redis:warm-user warms specific user', function () {
 
     DB::table('role_has_permissions')->insert(['role_id' => $roleId, 'permission_id' => $permId]);
     DB::table('model_has_roles')->insert([
-        'role_id' => $roleId,
-        'model_id' => $user->id,
+        'role_id'    => $roleId,
+        'model_id'   => $user->id,
         'model_type' => User::class,
     ]);
 

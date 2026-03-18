@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Tests\Fixtures;
+namespace Scabarcas\LaravelPermissionsRedis\Tests\Fixtures;
 
 use Illuminate\Database\Eloquent\Model;
-use Sebastian\LaravelPermissionsRedis\Traits\HasRedisPermissions;
+use Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions;
 
 /**
  * @property int    $id
@@ -16,7 +16,7 @@ class User extends Model
 {
     use HasRedisPermissions;
 
-    protected $guarded = ['id'];
-
     public $timestamps = false;
+
+    protected $guarded = ['id'];
 }

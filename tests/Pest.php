@@ -2,6 +2,6 @@
 
 declare(strict_types=1);
 
-use Sebastian\LaravelPermissionsRedis\Tests\TestCase;
+use Scabarcas\LaravelPermissionsRedis\Tests\TestCase;
 
 uses(TestCase::class)->in('Unit', 'Integration');

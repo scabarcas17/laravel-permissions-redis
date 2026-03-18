@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Sebastian\LaravelPermissionsRedis\Exceptions;
+namespace Scabarcas\LaravelPermissionsRedis\Exceptions;
 
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -53,7 +53,7 @@ class UnauthorizedException extends HttpException
 
     public static function notLoggedIn(): self
     {
-        return new self(403, 'User is not authenticated.');
+        return new self(401, 'User is not authenticated.');
     }
 
     /** @return array<string> */
