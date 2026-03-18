@@ -171,12 +171,13 @@ class AuthorizationCacheManager
 
     private function warmAllRoles(): void
     {
-        /** @var Collection<int, int> $roles */
-        $roles = DB::table($this->table('roles'))->pluck('id');
-
-        foreach ($roles as $roleId) {
-            $this->warmRole((int) $roleId);
-        }
+        DB::table($this->table('roles'))->orderBy('id')->chunk(200, function (Collection $roles): void {
+            foreach ($roles as $role) {
+                /** @var int $roleId */
+                $roleId = $role->id;
+                $this->warmRole($roleId);
+            }
+        });
     }
 
     private function warmAllUsers(): void
@@ -186,12 +187,13 @@ class AuthorizationCacheManager
 
         $table = (new $userModel())->getTable();
 
-        /** @var Collection<int, int> $userIds */
-        $userIds = DB::table($table)->pluck('id');
-
-        foreach ($userIds as $userId) {
-            $this->warmUser((int) $userId);
-        }
+        DB::table($table)->orderBy('id')->chunk(200, function (Collection $users): void {
+            foreach ($users as $user) {
+                /** @var int $userId */
+                $userId = $user->id;
+                $this->warmUser($userId);
+            }
+        });
     }
 
     private function userModelType(): string

@@ -148,6 +148,50 @@ test('flush clears all in-memory caches', function () {
     $this->resolver->hasPermission(1, 'users.create');
 });
 
+// ─── super admin ───
+
+test('super admin bypasses all permission checks', function () {
+    config()->set('permissions-redis.super_admin_role', 'super-admin');
+
+    $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
+    $this->repository->shouldReceive('userHasRole')->with(1, 'super-admin')->once()->andReturn(true);
+
+    expect($this->resolver->hasPermission(1, 'anything'))->toBeTrue();
+});
+
+test('non super admin falls through to normal check', function () {
+    config()->set('permissions-redis.super_admin_role', 'super-admin');
+
+    $this->repository->shouldReceive('userCacheExists')->with(1)->twice()->andReturn(true);
+    $this->repository->shouldReceive('userHasRole')->with(1, 'super-admin')->once()->andReturn(false);
+    $this->repository->shouldReceive('userHasPermission')->with(1, 'users.create')->once()->andReturn(false);
+
+    expect($this->resolver->hasPermission(1, 'users.create'))->toBeFalse();
+});
+
+// ─── wildcard permissions ───
+
+test('wildcard permission matches with fnmatch', function () {
+    config()->set('permissions-redis.wildcard_permissions', true);
+
+    $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
+    $this->repository->shouldReceive('userHasPermission')->with(1, 'users.create')->once()->andReturn(false);
+    $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['users.*', 'posts.view']);
+
+    expect($this->resolver->hasPermission(1, 'users.create'))->toBeTrue();
+});
+
+test('wildcard does not match when disabled', function () {
+    config()->set('permissions-redis.wildcard_permissions', false);
+
+    $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
+    $this->repository->shouldReceive('userHasPermission')->with(1, 'users.create')->once()->andReturn(false);
+
+    expect($this->resolver->hasPermission(1, 'users.create'))->toBeFalse();
+});
+
+// ─── flush ───
+
 test('flushUser clears only specific user cache', function () {
     // Populate cache for user 1 and 2
     $this->repository->shouldReceive('userCacheExists')->with(1)->twice()->andReturn(true);

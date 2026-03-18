@@ -35,6 +35,10 @@ class PermissionResolver implements PermissionResolverInterface
 
     public function hasPermission(int $userId, string $permission): bool
     {
+        if ($this->isSuperAdmin($userId)) {
+            return true;
+        }
+
         if (isset($this->permissionCache[$userId][$permission])) {
             return $this->permissionCache[$userId][$permission];
         }
@@ -42,6 +46,10 @@ class PermissionResolver implements PermissionResolverInterface
         $this->ensureUserCacheExists($userId);
 
         $result = $this->repository->userHasPermission($userId, $permission);
+
+        if (!$result && $this->wildcardEnabled()) {
+            $result = $this->matchWildcard($userId, $permission);
+        }
 
         $this->permissionCache[$userId][$permission] = $result;
 
@@ -129,5 +137,38 @@ class PermissionResolver implements PermissionResolverInterface
             $this->log("Auth cache miss for user {$userId}, warming from database.", 'warning');
             $this->cacheManager->warmUser($userId);
         }
+    }
+
+    private function isSuperAdmin(int $userId): bool
+    {
+        /** @var string|null $superAdminRole */
+        $superAdminRole = config('permissions-redis.super_admin_role');
+
+        if ($superAdminRole === null) {
+            return false;
+        }
+
+        return $this->hasRole($userId, $superAdminRole);
+    }
+
+    private function wildcardEnabled(): bool
+    {
+        /** @var bool $enabled */
+        $enabled = config('permissions-redis.wildcard_permissions', false);
+
+        return $enabled;
+    }
+
+    private function matchWildcard(int $userId, string $permission): bool
+    {
+        $allPermissions = $this->repository->getUserPermissions($userId);
+
+        foreach ($allPermissions as $stored) {
+            if (str_contains($stored, '*') && fnmatch($stored, $permission)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -6,6 +6,7 @@ namespace Scabarcas\LaravelPermissionsRedis\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Scabarcas\LaravelPermissionsRedis\Events\RoleDeleted;
 
 /**
  * @property int         $id
@@ -16,6 +17,16 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 class Role extends Model
 {
     protected $guarded = ['id'];
+
+    public static function findOrCreate(string $name, string $guardName = 'web'): static
+    {
+        /** @var static $role */
+        $role = static::query()->firstOrCreate(
+            ['name' => $name, 'guard_name' => $guardName],
+        );
+
+        return $role;
+    }
 
     public function getTable(): string
     {
@@ -54,5 +65,12 @@ class Role extends Model
             foreignPivotKey: 'role_id',
             relatedPivotKey: 'model_id',
         );
+    }
+
+    protected static function booted(): void
+    {
+        static::deleted(function (Role $role): void {
+            event(new RoleDeleted($role->id));
+        });
     }
 }

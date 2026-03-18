@@ -1,0 +1,83 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class () extends Migration {
+    public function up(): void
+    {
+        $tables = config('permissions-redis.tables', []);
+
+        // 1. permissions table
+        Schema::create($tables['permissions'] ?? 'permissions', function (Blueprint $table) {
+            $table->bigIncrements('id');
+            $table->string('name');
+            $table->string('description')->nullable();
+            $table->string('group')->nullable();
+            $table->string('guard_name');
+            $table->timestamps();
+            $table->unique(['name', 'guard_name']);
+        });
+
+        // 2. roles table
+        Schema::create($tables['roles'] ?? 'roles', function (Blueprint $table) {
+            $table->bigIncrements('id');
+            $table->string('name');
+            $table->string('description')->nullable();
+            $table->string('guard_name');
+            $table->timestamps();
+            $table->unique(['name', 'guard_name']);
+        });
+
+        // 3. model_has_permissions pivot
+        $permissionsTable = $tables['permissions'] ?? 'permissions';
+        $modelHasPermissions = $tables['model_has_permissions'] ?? 'model_has_permissions';
+
+        Schema::create($modelHasPermissions, function (Blueprint $table) use ($permissionsTable) {
+            $table->unsignedBigInteger('permission_id');
+            $table->string('model_type');
+            $table->unsignedBigInteger('model_id');
+            $table->index(['model_id', 'model_type'], 'model_has_permissions_model_id_model_type_index');
+            $table->foreign('permission_id')->references('id')->on($permissionsTable)->onDelete('cascade');
+            $table->primary(['permission_id', 'model_id', 'model_type'], 'model_has_permissions_permission_model_type_primary');
+        });
+
+        // 4. role_has_permissions pivot
+        $rolesTable = $tables['roles'] ?? 'roles';
+        $roleHasPermissions = $tables['role_has_permissions'] ?? 'role_has_permissions';
+
+        Schema::create($roleHasPermissions, function (Blueprint $table) use ($permissionsTable, $rolesTable) {
+            $table->unsignedBigInteger('permission_id');
+            $table->unsignedBigInteger('role_id');
+            $table->foreign('permission_id')->references('id')->on($permissionsTable)->onDelete('cascade');
+            $table->foreign('role_id')->references('id')->on($rolesTable)->onDelete('cascade');
+            $table->primary(['permission_id', 'role_id'], 'role_has_permissions_permission_id_role_id_primary');
+        });
+
+        // 5. model_has_roles pivot
+        $modelHasRoles = $tables['model_has_roles'] ?? 'model_has_roles';
+
+        Schema::create($modelHasRoles, function (Blueprint $table) use ($rolesTable) {
+            $table->unsignedBigInteger('role_id');
+            $table->string('model_type');
+            $table->unsignedBigInteger('model_id');
+            $table->index(['model_id', 'model_type'], 'model_has_roles_model_id_model_type_index');
+            $table->foreign('role_id')->references('id')->on($rolesTable)->onDelete('cascade');
+            $table->primary(['role_id', 'model_id', 'model_type'], 'model_has_roles_role_model_type_primary');
+        });
+    }
+
+    public function down(): void
+    {
+        $tables = config('permissions-redis.tables', []);
+
+        Schema::dropIfExists($tables['model_has_roles'] ?? 'model_has_roles');
+        Schema::dropIfExists($tables['role_has_permissions'] ?? 'role_has_permissions');
+        Schema::dropIfExists($tables['model_has_permissions'] ?? 'model_has_permissions');
+        Schema::dropIfExists($tables['roles'] ?? 'roles');
+        Schema::dropIfExists($tables['permissions'] ?? 'permissions');
+    }
+};

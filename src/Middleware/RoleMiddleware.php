@@ -26,10 +26,25 @@ class RoleMiddleware
             throw UnauthorizedException::notLoggedIn();
         }
 
+        /** @var int $userId */
+        $userId = $user->getAuthIdentifier();
+
+        if (str_contains($role, '&')) {
+            $roles = array_map('trim', explode('&', $role));
+
+            foreach ($roles as $r) {
+                if (!$this->resolver->hasRole($userId, $r)) {
+                    throw UnauthorizedException::forRoles($roles);
+                }
+            }
+
+            return $next($request);
+        }
+
         $roles = explode('|', $role);
 
         foreach ($roles as $r) {
-            if ($this->resolver->hasRole($user->id, $r)) {
+            if ($this->resolver->hasRole($userId, $r)) {
                 return $next($request);
             }
         }

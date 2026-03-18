@@ -50,6 +50,41 @@ test('Role model creates and retrieves correctly', function () {
     $this->assertDatabaseHas('roles', ['name' => 'admin']);
 });
 
+test('Permission findOrCreate creates new permission', function () {
+    $perm = Permission::findOrCreate('users.create', 'web', 'users');
+
+    expect($perm->name)->toBe('users.create')
+        ->and($perm->guard_name)->toBe('web')
+        ->and($perm->group)->toBe('users');
+
+    $this->assertDatabaseHas('permissions', ['name' => 'users.create']);
+});
+
+test('Permission findOrCreate returns existing permission', function () {
+    $first = Permission::create(['name' => 'users.create', 'guard_name' => 'web']);
+    $second = Permission::findOrCreate('users.create', 'web');
+
+    expect($second->id)->toBe($first->id);
+    expect(Permission::where('name', 'users.create')->count())->toBe(1);
+});
+
+test('Role findOrCreate creates new role', function () {
+    $role = Role::findOrCreate('admin', 'web');
+
+    expect($role->name)->toBe('admin')
+        ->and($role->guard_name)->toBe('web');
+
+    $this->assertDatabaseHas('roles', ['name' => 'admin']);
+});
+
+test('Role findOrCreate returns existing role', function () {
+    $first = Role::create(['name' => 'admin', 'guard_name' => 'web']);
+    $second = Role::findOrCreate('admin', 'web');
+
+    expect($second->id)->toBe($first->id);
+    expect(Role::where('name', 'admin')->count())->toBe(1);
+});
+
 test('Role has many-to-many permissions relationship', function () {
     $role = Role::create(['name' => 'admin', 'guard_name' => 'web']);
     $perm1 = Permission::create(['name' => 'users.create', 'guard_name' => 'web']);

@@ -11,8 +11,10 @@ use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
+use Scabarcas\LaravelPermissionsRedis\Blade\BladeDirectivesRegistrar;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Cache\RedisPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Commands\CacheStatsCommand;
 use Scabarcas\LaravelPermissionsRedis\Commands\FlushCacheCommand;
 use Scabarcas\LaravelPermissionsRedis\Commands\WarmCacheCommand;
 use Scabarcas\LaravelPermissionsRedis\Commands\WarmUserCacheCommand;
@@ -53,6 +55,10 @@ class PermissionsRedisServiceProvider extends ServiceProvider
             $this->registerMiddleware();
         }
 
+        if (config('permissions-redis.register_blade_directives', true)) {
+            BladeDirectivesRegistrar::register();
+        }
+
         if (config('permissions-redis.warm_on_login', true)) {
             $this->registerWarmOnLogin();
         }
@@ -80,6 +86,7 @@ class PermissionsRedisServiceProvider extends ServiceProvider
                 WarmCacheCommand::class,
                 WarmUserCacheCommand::class,
                 FlushCacheCommand::class,
+                CacheStatsCommand::class,
             ]);
         }
     }

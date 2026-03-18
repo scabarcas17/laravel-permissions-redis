@@ -26,10 +26,25 @@ class PermissionMiddleware
             throw UnauthorizedException::notLoggedIn();
         }
 
+        /** @var int $userId */
+        $userId = $user->getAuthIdentifier();
+
+        if (str_contains($permission, '&')) {
+            $permissions = array_map('trim', explode('&', $permission));
+
+            foreach ($permissions as $perm) {
+                if (!$this->resolver->hasPermission($userId, $perm)) {
+                    throw UnauthorizedException::forPermissions($permissions);
+                }
+            }
+
+            return $next($request);
+        }
+
         $permissions = explode('|', $permission);
 
         foreach ($permissions as $perm) {
-            if ($this->resolver->hasPermission($user->id, $perm)) {
+            if ($this->resolver->hasPermission($userId, $perm)) {
                 return $next($request);
             }
         }

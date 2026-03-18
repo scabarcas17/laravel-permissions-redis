@@ -26,14 +26,29 @@ class RoleOrPermissionMiddleware
             throw UnauthorizedException::notLoggedIn();
         }
 
+        /** @var int $userId */
+        $userId = $user->getAuthIdentifier();
+
+        if (str_contains($roleOrPermission, '&')) {
+            $items = array_map('trim', explode('&', $roleOrPermission));
+
+            foreach ($items as $item) {
+                if (!$this->resolver->hasPermission($userId, $item) && !$this->resolver->hasRole($userId, $item)) {
+                    throw UnauthorizedException::forRolesOrPermissions($items);
+                }
+            }
+
+            return $next($request);
+        }
+
         $rolesOrPermissions = explode('|', $roleOrPermission);
 
         foreach ($rolesOrPermissions as $item) {
-            if ($this->resolver->hasPermission($user->id, $item)) {
+            if ($this->resolver->hasPermission($userId, $item)) {
                 return $next($request);
             }
 
-            if ($this->resolver->hasRole($user->id, $item)) {
+            if ($this->resolver->hasRole($userId, $item)) {
                 return $next($request);
             }
         }

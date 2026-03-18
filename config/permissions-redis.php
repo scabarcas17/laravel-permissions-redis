@@ -102,6 +102,43 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Super Admin Role
+    |--------------------------------------------------------------------------
+    |
+    | Users with this role will bypass all permission checks, returning true
+    | for every hasPermission() call. Set to null to disable.
+    |
+    */
+
+    'super_admin_role' => env('PERMISSIONS_REDIS_SUPER_ADMIN_ROLE', null),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Wildcard Permissions
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, permissions support wildcard patterns using fnmatch().
+    | For example, 'users.*' will match 'users.create', 'users.edit', etc.
+    |
+    */
+
+    'wildcard_permissions' => (bool) env('PERMISSIONS_REDIS_WILDCARD', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Register Blade Directives
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the package registers Blade directives:
+    | @role, @hasanyrole, @hasallroles, @permission, @hasanypermission,
+    | @hasallpermissions — all resolved through Redis.
+    |
+    */
+
+    'register_blade_directives' => true,
+
+    /*
+    |--------------------------------------------------------------------------
     | Table Names
     |--------------------------------------------------------------------------
     |

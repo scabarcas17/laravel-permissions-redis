@@ -33,8 +33,10 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         ]);
     }
 
-    /** @return array<string>
+    /**
      * @throws Throwable
+     *
+/** @return array<string>
      */
     public function getUserPermissions(int $userId): array
     {
@@ -46,8 +48,10 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         return array_values(array_filter($members ?: [], fn (string $m): bool => $m !== '__empty__'));
     }
 
-    /** @return array<string>
+    /**
      * @throws Throwable
+     *
+/** @return array<string>
      */
     public function getUserRoles(int $userId): array
     {
@@ -59,8 +63,10 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         return array_values(array_filter($members ?: [], fn (string $m): bool => $m !== '__empty__'));
     }
 
-    /** @return array<int>
+    /**
      * @throws Throwable
+     *
+/** @return array<int>
      */
     public function getRoleUserIds(int $roleId): array
     {
