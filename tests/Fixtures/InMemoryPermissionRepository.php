@@ -1,0 +1,97 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Sebastian\LaravelPermissionsRedis\Tests\Fixtures;
+
+use Sebastian\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+
+class InMemoryPermissionRepository implements PermissionRepositoryInterface
+{
+    /** @var array<string, array<string>> */
+    private array $userPermissions = [];
+
+    /** @var array<string, array<string>> */
+    private array $userRoles = [];
+
+    /** @var array<string, array<string>> */
+    private array $rolePermissions = [];
+
+    /** @var array<string, array<int>> */
+    private array $roleUsers = [];
+
+    public function userHasPermission(int $userId, string $permission): bool
+    {
+        return in_array($permission, $this->userPermissions[$userId] ?? [], true);
+    }
+
+    public function userHasRole(int $userId, string $role): bool
+    {
+        return in_array($role, $this->userRoles[$userId] ?? [], true);
+    }
+
+    /** @return array<string> */
+    public function getUserPermissions(int $userId): array
+    {
+        return $this->userPermissions[$userId] ?? [];
+    }
+
+    /** @return array<string> */
+    public function getUserRoles(int $userId): array
+    {
+        return $this->userRoles[$userId] ?? [];
+    }
+
+    /** @return array<int> */
+    public function getRoleUserIds(int $roleId): array
+    {
+        return $this->roleUsers[$roleId] ?? [];
+    }
+
+    /** @param array<string> $permissions */
+    public function setUserPermissions(int $userId, array $permissions): void
+    {
+        $this->userPermissions[$userId] = $permissions;
+    }
+
+    /** @param array<string> $roles */
+    public function setUserRoles(int $userId, array $roles): void
+    {
+        $this->userRoles[$userId] = $roles;
+    }
+
+    /** @param array<string> $permissions */
+    public function setRolePermissions(int $roleId, array $permissions): void
+    {
+        $this->rolePermissions[$roleId] = $permissions;
+    }
+
+    /** @param array<int> $userIds */
+    public function setRoleUsers(int $roleId, array $userIds): void
+    {
+        $this->roleUsers[$roleId] = $userIds;
+    }
+
+    public function userCacheExists(int $userId): bool
+    {
+        return isset($this->userPermissions[$userId]);
+    }
+
+    public function deleteUserCache(int $userId): void
+    {
+        unset($this->userPermissions[$userId], $this->userRoles[$userId]);
+    }
+
+    public function deleteRoleCache(int $roleId): void
+    {
+        unset($this->rolePermissions[$roleId], $this->roleUsers[$roleId]);
+    }
+
+    public function flushAll(): void
+    {
+        $this->userPermissions = [];
+        $this->userRoles = [];
+        $this->rolePermissions = [];
+        $this->roleUsers = [];
+    }
+}
