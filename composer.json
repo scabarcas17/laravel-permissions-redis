@@ -4,16 +4,22 @@
     "type": "library",
     "require": {
         "php": "^8.3",
-        "illuminate/support": "^11.0|^12.0"
+        "illuminate/support": "^11.0|^12.0",
+        "illuminate/database": "^11.0|^12.0",
+        "illuminate/redis": "^11.0|^12.0",
+        "illuminate/events": "^11.0|^12.0",
+        "illuminate/auth": "^11.0|^12.0"
     },
     "require-dev": {
         "pestphp/pest": "^4.4",
         "phpstan/phpstan": "^2.1",
-        "larastan/larastan": "^3.9",
-        "laravel/pint": "^1.29"
+        "larastan/larastan": "^3",
+        "laravel/pint": "^1.29",
+        "laravel/framework": "^12.0",
+        "orchestra/testbench": "^10.11"
     },
     "license": "MIT",
-    "keywords": ["laravel", "permissions", "roles", "redis", "performance"],
+    "keywords": ["laravel", "permissions", "roles", "redis", "performance", "cache", "authorization"],
     "autoload": {
         "psr-4": {
             "Sebastian\\LaravelPermissionsRedis\\": "src/"
@@ -41,6 +47,13 @@
     "config": {
         "allow-plugins": {
             "pestphp/pest-plugin": true
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Sebastian\\LaravelPermissionsRedis\\PermissionsRedisServiceProvider"
+            ]
         }
     }
 }
