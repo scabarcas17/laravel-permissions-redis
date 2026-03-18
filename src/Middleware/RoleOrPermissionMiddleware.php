@@ -1,0 +1,45 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Sebastian\LaravelPermissionsRedis\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+use Sebastian\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
+use Sebastian\LaravelPermissionsRedis\Exceptions\UnauthorizedException;
+use Symfony\Component\HttpFoundation\Response;
+
+class RoleOrPermissionMiddleware
+{
+    public function __construct(
+        private readonly PermissionResolverInterface $resolver,
+    ) {
+    }
+
+    /**
+     * @throws UnauthorizedException
+     */
+    public function handle(Request $request, Closure $next, string $roleOrPermission, ?string $guard = null): Response
+    {
+        $user = $request->user($guard);
+
+        if ($user === null) {
+            throw UnauthorizedException::notLoggedIn();
+        }
+
+        $rolesOrPermissions = explode('|', $roleOrPermission);
+
+        foreach ($rolesOrPermissions as $item) {
+            if ($this->resolver->hasPermission($user->id, $item)) {
+                return $next($request);
+            }
+
+            if ($this->resolver->hasRole($user->id, $item)) {
+                return $next($request);
+            }
+        }
+
+        throw UnauthorizedException::forRolesOrPermissions($rolesOrPermissions);
+    }
+}
