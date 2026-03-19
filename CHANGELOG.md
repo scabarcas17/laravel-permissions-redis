@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-03-19
+
+### Changed
+
+- **Migration filename** — renamed to `0000_00_00_000000_create_permission_tables.php` so it loads with a neutral timestamp and does not conflict with application migrations regardless of publish order.
+- **Default publish group** — config and migrations are now also published via `php artisan vendor:publish --provider` (no tag required), in addition to the explicit `permissions-redis-migrations` tag.
+
 ## [1.0.0] - 2026-03-19
 
 First stable release of `scabarcas/laravel-permissions-redis`.
@@ -33,4 +40,5 @@ First stable release of `scabarcas/laravel-permissions-redis`.
 - **Comprehensive test suite** — Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
 - **Documentation** — README with installation guide, usage examples, conventions, API reference, and C4 architecture diagrams.
 
+[1.0.1]: https://github.com/scabarcas/laravel-permissions-redis/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/scabarcas/laravel-permissions-redis/releases/tag/v1.0.0
