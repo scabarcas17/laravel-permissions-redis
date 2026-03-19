@@ -7,6 +7,7 @@ namespace Scabarcas\LaravelPermissionsRedis\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Redis;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Throwable;
 
 class CacheStatsCommand extends Command
 {
@@ -14,6 +15,9 @@ class CacheStatsCommand extends Command
 
     protected $description = 'Display authorization cache statistics';
 
+    /**
+     * @throws Throwable
+     */
     public function handle(PermissionRepositoryInterface $repository): int
     {
         /** @var string $connectionName */
