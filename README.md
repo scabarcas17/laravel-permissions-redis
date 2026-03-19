@@ -85,104 +85,108 @@ Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permis
 
 ## Architecture
 
-### C4 — System Context
-
-```mermaid
-C4Context
-    title System Context — Laravel Permissions Redis
-
-    Person(user, "Application User", "End user interacting with the Laravel app")
-    System(app, "Laravel Application", "Web application using roles and permissions for authorization")
-    SystemDb(redis, "Redis", "In-memory cache storing resolved permissions and roles as SETs")
-    SystemDb(db, "Database", "Source of truth for permissions, roles, and assignments")
-
-    Rel(user, app, "HTTP requests")
-    Rel(app, redis, "Read permissions/roles (SISMEMBER, SMEMBERS)")
-    Rel(app, db, "Read/Write role & permission definitions")
-    Rel(app, redis, "Write cache (warm/evict)")
-```
-
-### C4 — Container
-
-```mermaid
-C4Container
-    title Container Diagram — Laravel Permissions Redis
-
-    Person(user, "Application User")
-
-    Container_Boundary(laravel, "Laravel Application") {
-        Component(middleware, "Middleware Layer", "permission, role, role_or_permission", "Guards routes based on authorization")
-        Component(blade, "Blade Directives", "@role, @permission, ...", "Controls visibility in templates")
-        Component(trait, "HasRedisPermissions Trait", "User Model Mixin", "Primary API for assigning and checking roles/permissions")
-        Component(resolver, "PermissionResolver", "Resolution Engine", "In-memory cache + Redis lookup + wildcard matching")
-        Component(repo, "RedisPermissionRepository", "Redis Client", "Low-level Redis SET operations with MULTI/EXEC atomicity")
-        Component(manager, "AuthorizationCacheManager", "Cache Orchestrator", "Warms and evicts cache from DB to Redis")
-        Component(events, "Event System", "CacheInvalidator", "Listens to model changes and triggers cache refresh")
-    }
-
-    SystemDb(redis, "Redis", "Caches resolved permissions/roles as SETs with TTL")
-    SystemDb(db, "Database", "5 tables: permissions, roles, model_has_permissions, model_has_roles, role_has_permissions")
-
-    Rel(user, middleware, "HTTP Request")
-    Rel(user, blade, "Views")
-    Rel(middleware, trait, "Checks authorization")
-    Rel(blade, trait, "Checks authorization")
-    Rel(trait, resolver, "hasPermissionTo(), hasRole()")
-    Rel(resolver, repo, "Redis lookups")
-    Rel(repo, redis, "SISMEMBER, SMEMBERS, SADD")
-    Rel(manager, db, "Queries permissions/roles")
-    Rel(manager, repo, "Writes cache sets")
-    Rel(events, manager, "Triggers warm/evict")
-```
-
-### C4 — Component (Resolution Flow)
-
-```mermaid
-flowchart TD
-    A["hasPermissionTo('posts.edit')"] --> B{In-memory cache?}
-    B -->|Hit| C[Return cached result]
-    B -->|Miss| D{Redis SISMEMBER}
-    D -->|Hit| E[Cache in memory + return]
-    D -->|Miss / Key absent| F{User cache exists in Redis?}
-    F -->|Yes| G[Permission denied]
-    F -->|No — cold start| H[AuthorizationCacheManager::warmUser]
-    H --> I[Query DB: direct perms + role perms]
-    I --> J[Write merged SETs to Redis]
-    J --> D
-
-    E --> K{Wildcard enabled?}
-    K -->|No| L[Return false]
-    K -->|Yes| M["fnmatch() scan all user perms"]
-    M --> N[Return match result]
-
-    style A fill:#4A90D9,color:#fff
-    style C fill:#2ECC71,color:#fff
-    style E fill:#2ECC71,color:#fff
-    style G fill:#E74C3C,color:#fff
-    style H fill:#F39C12,color:#fff
-```
-
-### C4 — Cache Invalidation Flow
+### System Context
 
 ```mermaid
 flowchart LR
-    A[DB Change] --> B[Eloquent Event Dispatched]
-    B --> C{Event Type}
-    C -->|RolesAssigned| D[Rewarm user + reindex role→users]
-    C -->|PermissionsSynced| E[Rewarm role + all users with role]
-    C -->|RoleDeleted| F[Evict role + rewarm affected users]
-    C -->|UserDeleted| G[Evict user cache]
-    C -->|Login| H[Warm user cache]
+    User["👤 Application User"]
 
-    D --> I[Redis Updated]
+    subgraph system [" "]
+        App["🟩 Laravel Application\nRoles & permissions\nfor authorization"]
+    end
+
+    Redis[("🔴 Redis\nCached permissions\nand roles as SETs")]
+    DB[("🟦 Database\nSource of truth:\npermissions, roles,\nassignments")]
+
+    User -- "HTTP requests" --> App
+    App -- "Read: SISMEMBER, SMEMBERS\nWrite: warm / evict" --> Redis
+    App -- "Read/Write:\nrole & permission\ndefinitions" --> DB
+```
+
+### Container Diagram
+
+```mermaid
+flowchart TB
+    User["👤 Application User"]
+
+    subgraph laravel ["Laravel Application"]
+        direction TB
+
+        subgraph entry ["Entry Points"]
+            MW["🛡️ Middleware\npermission · role\nrole_or_permission"]
+            BL["🖼️ Blade Directives\n@role · @permission\n@hasanyrole · ..."]
+        end
+
+        Trait["📦 HasRedisPermissions\nUser Model Trait\nassign · check · sync"]
+
+        subgraph core ["Resolution & Cache"]
+            direction LR
+            Resolver["⚙️ PermissionResolver\nIn-memory cache\nWildcard matching"]
+            Repo["🔌 RedisPermissionRepository\nSISMEMBER · SMEMBERS\nMULTI/EXEC atomicity"]
+        end
+
+        subgraph sync ["Sync & Events"]
+            direction LR
+            Manager["♻️ AuthorizationCacheManager\nwarmAll · warmUser\nevictUser · evictRole"]
+            Events["📡 CacheInvalidator\nRolesAssigned\nPermissionsSynced\nRoleDeleted"]
+        end
+    end
+
+    Redis[("🔴 Redis\nSETs with TTL")]
+    DB[("🟦 Database\n5 tables")]
+
+    User -- "HTTP Request" --> MW
+    User -- "Views" --> BL
+    MW --> Trait
+    BL --> Trait
+    Trait --> Resolver
+    Resolver --> Repo
+    Repo -- "Read/Write" --> Redis
+    Events --> Manager
+    Manager -- "Queries" --> DB
+    Manager --> Repo
+```
+
+### Resolution Flow
+
+```mermaid
+flowchart TD
+    A["hasPermissionTo('posts.edit')"] --> B{In-memory\ncache?}
+    B -- "Hit" --> C["✅ Return cached result"]
+    B -- "Miss" --> D{"Redis\nSISMEMBER?"}
+    D -- "Hit" --> E["✅ Cache in memory\nand return"]
+    D -- "Miss" --> F{"User cache\nexists in Redis?"}
+    F -- "Yes" --> K{"Wildcard\nenabled?"}
+    F -- "No (cold start)" --> H["AuthorizationCacheManager\n::warmUser()"]
+    H --> I["Query DB:\ndirect perms + role perms"]
+    I --> J["Write merged SETs\nto Redis"]
+    J --> D
+
+    K -- "No" --> L["❌ Permission denied"]
+    K -- "Yes" --> M["fnmatch() scan\nall user perms"]
+    M -- "Match" --> N["✅ Return true"]
+    M -- "No match" --> L
+
+```
+
+### Cache Invalidation Flow
+
+```mermaid
+flowchart TD
+    A["Database Change"] --> B{"Event Type"}
+
+    B -- "RolesAssigned" --> D["Rewarm user cache\n+ reindex role → users"]
+    B -- "PermissionsSynced" --> E["Rewarm role\n+ all users with that role"]
+    B -- "RoleDeleted" --> F["Evict role cache\n+ rewarm affected users"]
+    B -- "UserDeleted" --> G["Evict user cache\nfrom Redis"]
+    B -- "Login" --> H["Warm user cache\non authentication"]
+
+    D --> I["✅ Redis Updated"]
     E --> I
     F --> I
     G --> I
     H --> I
-    I --> J[PermissionResolver in-memory flushed]
-
-    style A fill:#8E44AD,color:#fff
-    style I fill:#2ECC71,color:#fff
+    I --> J["PermissionResolver\nin-memory cache flushed"]
 ```
 
 ### Redis Key Structure
