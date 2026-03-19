@@ -79,7 +79,7 @@ class PermissionsRedisServiceProvider extends ServiceProvider
 
             $this->publishes([
                 __DIR__ . '/../config/permissions-redis.php' => config_path('permissions-redis.php'),
-                __DIR__ . '/../database/migrations/' => database_path('migrations'),
+                __DIR__ . '/../database/migrations/'         => database_path('migrations'),
             ]);
         }
     }
