@@ -216,13 +216,23 @@ composer require scabarcas/laravel-permissions-redis
 
 The service provider is auto-discovered. No manual registration needed.
 
-### Step 2 — Publish Configuration
+### Step 2 — Publish Assets
+
+Publish config and migrations together:
 
 ```bash
 php artisan vendor:publish --provider="Scabarcas\LaravelPermissionsRedis\PermissionsRedisServiceProvider"
 ```
 
-This publishes `config/permissions-redis.php`.
+Or publish individually by tag:
+
+```bash
+# Config only
+php artisan vendor:publish --tag=permissions-redis-config
+
+# Migrations only
+php artisan vendor:publish --tag=permissions-redis-migrations
+```
 
 ### Step 3 — Run Migrations
 
