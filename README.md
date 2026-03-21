@@ -30,6 +30,7 @@ Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permis
 - [Conventions](#conventions)
 - [API Reference](#api-reference)
 - [Testing](#testing)
+- [Benchmark](#benchmark)
 - [License](#license)
 
 ---
@@ -722,6 +723,33 @@ $this->app->singleton(
     InMemoryPermissionRepository::class,
 );
 ```
+
+---
+
+## Benchmark
+
+We provide a [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) that compares query performance between `spatie/laravel-permission` and this package side by side.
+
+### Quick Results
+
+| Scenario | spatie/laravel-permission | laravel-permissions-redis | Reduction |
+|----------|:------------------------:|:-------------------------:|:---------:|
+| 1 iteration (33 checks) | 5 DB queries | 1 DB query | **80%** |
+| 10 iterations | 14 DB queries | 10 DB queries | **~29%** |
+| 50 iterations | 54 DB queries | 50 DB queries | **~7%** |
+
+> After the initial cache warm, all permission and role checks are resolved entirely from Redis with **zero additional database queries**.
+
+### Try it yourself
+
+```bash
+git clone https://github.com/scabarcas17/laravel-permissions-redis-benchmark.git
+cd laravel-permissions-redis-benchmark
+docker compose up -d
+# Open http://localhost:8080
+```
+
+See the [benchmark repository](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) for full details, screenshots, and instructions.
 
 ---
 
