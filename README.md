@@ -5,7 +5,7 @@ A high-performance, Redis-backed roles and permissions package for Laravel. Elim
 Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permission) — the de facto standard for roles and permissions in Laravel. This package adopts its familiar API (`hasRole`, `hasPermissionTo`, `assignRole`, Blade directives, middleware) while replacing the database-per-request approach with a Redis-first architecture for applications where authorization throughput is critical.
 
 [![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://php.net)
-[![Laravel 11|12](https://img.shields.io/badge/Laravel-11%20%7C%2012-red.svg)](https://laravel.com)
+[![Laravel 11|12|13](https://img.shields.io/badge/Laravel-11%20%7C%2012%20%7C%2013-red.svg)](https://laravel.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---
@@ -41,7 +41,7 @@ Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permis
 | Dependency | Version | Purpose |
 |---|---|---|
 | **PHP** | `^8.3` | Typed properties, enums, fibers, `readonly` classes |
-| **Laravel Framework** | `^11.0 \| ^12.0` | Host application |
+| **Laravel Framework** | `^11.0 \| ^12.0 \| ^13.0` | Host application |
 | **Redis extension** | `phpredis` or `predis` | Redis connectivity |
 
 ### PHP Extensions
@@ -58,11 +58,11 @@ Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permis
 
 | Package | Version | Role in the package |
 |---|---|---|
-| `illuminate/support` | `^11.0 \| ^12.0` | Service provider, collections, helpers |
-| `illuminate/database` | `^11.0 \| ^12.0` | Eloquent models, migrations, query builder |
-| `illuminate/redis` | `^11.0 \| ^12.0` | Redis connection manager |
-| `illuminate/events` | `^11.0 \| ^12.0` | Event dispatching and cache invalidation |
-| `illuminate/auth` | `^11.0 \| ^12.0` | Gate integration, login event listener |
+| `illuminate/support` | `^11.0 \| ^12.0 \| ^13.0` | Service provider, collections, helpers |
+| `illuminate/database` | `^11.0 \| ^12.0 \| ^13.0` | Eloquent models, migrations, query builder |
+| `illuminate/redis` | `^11.0 \| ^12.0 \| ^13.0` | Redis connection manager |
+| `illuminate/events` | `^11.0 \| ^12.0 \| ^13.0` | Event dispatching and cache invalidation |
+| `illuminate/auth` | `^11.0 \| ^12.0 \| ^13.0` | Gate integration, login event listener |
 
 ### Development Dependencies
 
@@ -72,7 +72,7 @@ Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permis
 | `phpstan/phpstan` | `^2.1` | Static analysis |
 | `larastan/larastan` | `^3` | Laravel-specific static analysis rules |
 | `laravel/pint` | `^1.29` | Code style formatting (PSR-12) |
-| `orchestra/testbench` | `^10.11` | Laravel package testing harness |
+| `orchestra/testbench` | `^10.11 \| ^11.0` | Laravel package testing harness |
 
 ### Infrastructure
 

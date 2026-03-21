@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-03-20
+
+### Added
+
+- **Laravel 13 support** — Added `^13.0` constraint to all `illuminate/*` dependencies, making the package fully compatible with Laravel 11, 12, and 13.
+- **Orchestra Testbench 11** — Added `^11.0` to dev dependencies for Laravel 13 testing support.
+
 ## [1.0.1] - 2026-03-19
 
 ### Changed
@@ -40,5 +47,6 @@ First stable release of `scabarcas/laravel-permissions-redis`.
 - **Comprehensive test suite** — Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
 - **Documentation** — README with installation guide, usage examples, conventions, API reference, and C4 architecture diagrams.
 
+[1.1.0]: https://github.com/scabarcas/laravel-permissions-redis/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/scabarcas/laravel-permissions-redis/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/scabarcas/laravel-permissions-redis/releases/tag/v1.0.0
