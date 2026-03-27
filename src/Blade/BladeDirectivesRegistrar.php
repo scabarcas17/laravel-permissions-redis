@@ -12,109 +12,75 @@ class BladeDirectivesRegistrar
     public static function register(): void
     {
         Blade::if('role', static function (string $role): bool {
-            $user = auth()->user();
-
-            if (!$user) {
-                return false;
-            }
-
-            /** @var int $userId */
-            $userId = $user->getAuthIdentifier();
-
-            return app(PermissionResolverInterface::class)->hasRole($userId, $role);
+            return self::resolveForUser(fn (int $userId, string $guard, PermissionResolverInterface $resolver) => $resolver->hasRole($userId, $role, $guard));
         });
 
         Blade::if('hasanyrole', static function (string $roles): bool {
-            $user = auth()->user();
-
-            if (!$user) {
-                return false;
-            }
-
-            /** @var int $userId */
-            $userId = $user->getAuthIdentifier();
-            $resolver = app(PermissionResolverInterface::class);
-
-            foreach (explode('|', $roles) as $role) {
-                if ($resolver->hasRole($userId, trim($role))) {
-                    return true;
+            return self::resolveForUser(function (int $userId, string $guard, PermissionResolverInterface $resolver) use ($roles): bool {
+                foreach (explode('|', $roles) as $role) {
+                    if ($resolver->hasRole($userId, trim($role), $guard)) {
+                        return true;
+                    }
                 }
-            }
 
-            return false;
+                return false;
+            });
         });
 
         Blade::if('hasallroles', static function (string $roles): bool {
-            $user = auth()->user();
-
-            if (!$user) {
-                return false;
-            }
-
-            /** @var int $userId */
-            $userId = $user->getAuthIdentifier();
-            $resolver = app(PermissionResolverInterface::class);
-
-            foreach (explode('|', $roles) as $role) {
-                if (!$resolver->hasRole($userId, trim($role))) {
-                    return false;
+            return self::resolveForUser(function (int $userId, string $guard, PermissionResolverInterface $resolver) use ($roles): bool {
+                foreach (explode('|', $roles) as $role) {
+                    if (!$resolver->hasRole($userId, trim($role), $guard)) {
+                        return false;
+                    }
                 }
-            }
 
-            return true;
+                return true;
+            });
         });
 
         Blade::if('permission', static function (string $permission): bool {
-            $user = auth()->user();
-
-            if (!$user) {
-                return false;
-            }
-
-            /** @var int $userId */
-            $userId = $user->getAuthIdentifier();
-
-            return app(PermissionResolverInterface::class)->hasPermission($userId, $permission);
+            return self::resolveForUser(fn (int $userId, string $guard, PermissionResolverInterface $resolver) => $resolver->hasPermission($userId, $permission, $guard));
         });
 
         Blade::if('hasanypermission', static function (string $permissions): bool {
-            $user = auth()->user();
-
-            if (!$user) {
-                return false;
-            }
-
-            /** @var int $userId */
-            $userId = $user->getAuthIdentifier();
-            $resolver = app(PermissionResolverInterface::class);
-
-            foreach (explode('|', $permissions) as $permission) {
-                if ($resolver->hasPermission($userId, trim($permission))) {
-                    return true;
+            return self::resolveForUser(function (int $userId, string $guard, PermissionResolverInterface $resolver) use ($permissions): bool {
+                foreach (explode('|', $permissions) as $permission) {
+                    if ($resolver->hasPermission($userId, trim($permission), $guard)) {
+                        return true;
+                    }
                 }
-            }
 
-            return false;
+                return false;
+            });
         });
 
         Blade::if('hasallpermissions', static function (string $permissions): bool {
-            $user = auth()->user();
-
-            if (!$user) {
-                return false;
-            }
-
-            /** @var int $userId */
-            $userId = $user->getAuthIdentifier();
-            $resolver = app(PermissionResolverInterface::class);
-
-            foreach (explode('|', $permissions) as $permission) {
-                if (!$resolver->hasPermission($userId, trim($permission))) {
-                    return false;
+            return self::resolveForUser(function (int $userId, string $guard, PermissionResolverInterface $resolver) use ($permissions): bool {
+                foreach (explode('|', $permissions) as $permission) {
+                    if (!$resolver->hasPermission($userId, trim($permission), $guard)) {
+                        return false;
+                    }
                 }
-            }
 
-            return true;
+                return true;
+            });
         });
+    }
+
+    /** @param callable(int, string, PermissionResolverInterface): bool $callback */
+    private static function resolveForUser(callable $callback): bool
+    {
+        $user = auth()->user();
+
+        if ($user === null) {
+            return false;
+        }
+
+        /** @var int $userId */
+        $userId = $user->getAuthIdentifier();
+        $guard = auth()->getDefaultDriver();
+
+        return $callback($userId, $guard, app(PermissionResolverInterface::class));
     }
 }

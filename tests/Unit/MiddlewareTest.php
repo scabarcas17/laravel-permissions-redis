@@ -31,7 +31,7 @@ function passThrough(): Closure
 describe('PermissionMiddleware', function () {
     test('allows request when user has single permission', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasPermission')->with(1, 'users.create')->once()->andReturn(true);
+        $resolver->shouldReceive('hasPermission')->with(1, 'users.create', 'web')->once()->andReturn(true);
 
         $user = new User();
         $user->id = 1;
@@ -44,8 +44,8 @@ describe('PermissionMiddleware', function () {
 
     test('allows request when user has one of pipe-separated permissions', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasPermission')->with(1, 'users.create')->once()->andReturn(false);
-        $resolver->shouldReceive('hasPermission')->with(1, 'users.edit')->once()->andReturn(true);
+        $resolver->shouldReceive('hasPermission')->with(1, 'users.create', 'web')->once()->andReturn(false);
+        $resolver->shouldReceive('hasPermission')->with(1, 'users.edit', 'web')->once()->andReturn(true);
 
         $user = new User();
         $user->id = 1;
@@ -58,7 +58,7 @@ describe('PermissionMiddleware', function () {
 
     test('throws UnauthorizedException when user lacks permissions', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasPermission')->with(1, 'users.delete')->once()->andReturn(false);
+        $resolver->shouldReceive('hasPermission')->with(1, 'users.delete', 'web')->once()->andReturn(false);
 
         $user = new User();
         $user->id = 1;
@@ -76,8 +76,8 @@ describe('PermissionMiddleware', function () {
 
     test('requires all permissions with AND operator (&)', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasPermission')->with(1, 'users.create')->once()->andReturn(true);
-        $resolver->shouldReceive('hasPermission')->with(1, 'users.edit')->once()->andReturn(true);
+        $resolver->shouldReceive('hasPermission')->with(1, 'users.create', 'web')->once()->andReturn(true);
+        $resolver->shouldReceive('hasPermission')->with(1, 'users.edit', 'web')->once()->andReturn(true);
 
         $user = new User();
         $user->id = 1;
@@ -90,8 +90,8 @@ describe('PermissionMiddleware', function () {
 
     test('throws when user lacks one of AND permissions', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasPermission')->with(1, 'users.create')->once()->andReturn(true);
-        $resolver->shouldReceive('hasPermission')->with(1, 'users.delete')->once()->andReturn(false);
+        $resolver->shouldReceive('hasPermission')->with(1, 'users.create', 'web')->once()->andReturn(true);
+        $resolver->shouldReceive('hasPermission')->with(1, 'users.delete', 'web')->once()->andReturn(false);
 
         $user = new User();
         $user->id = 1;
@@ -106,7 +106,7 @@ describe('PermissionMiddleware', function () {
 describe('RoleMiddleware', function () {
     test('allows request when user has single role', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasRole')->with(1, 'admin')->once()->andReturn(true);
+        $resolver->shouldReceive('hasRole')->with(1, 'admin', 'web')->once()->andReturn(true);
 
         $user = new User();
         $user->id = 1;
@@ -119,8 +119,8 @@ describe('RoleMiddleware', function () {
 
     test('allows request when user has one of pipe-separated roles', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasRole')->with(1, 'admin')->once()->andReturn(false);
-        $resolver->shouldReceive('hasRole')->with(1, 'editor')->once()->andReturn(true);
+        $resolver->shouldReceive('hasRole')->with(1, 'admin', 'web')->once()->andReturn(false);
+        $resolver->shouldReceive('hasRole')->with(1, 'editor', 'web')->once()->andReturn(true);
 
         $user = new User();
         $user->id = 1;
@@ -133,7 +133,7 @@ describe('RoleMiddleware', function () {
 
     test('throws UnauthorizedException when user lacks roles', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasRole')->with(1, 'admin')->once()->andReturn(false);
+        $resolver->shouldReceive('hasRole')->with(1, 'admin', 'web')->once()->andReturn(false);
 
         $user = new User();
         $user->id = 1;
@@ -151,8 +151,8 @@ describe('RoleMiddleware', function () {
 
     test('requires all roles with AND operator (&)', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasRole')->with(1, 'admin')->once()->andReturn(true);
-        $resolver->shouldReceive('hasRole')->with(1, 'editor')->once()->andReturn(true);
+        $resolver->shouldReceive('hasRole')->with(1, 'admin', 'web')->once()->andReturn(true);
+        $resolver->shouldReceive('hasRole')->with(1, 'editor', 'web')->once()->andReturn(true);
 
         $user = new User();
         $user->id = 1;
@@ -165,8 +165,8 @@ describe('RoleMiddleware', function () {
 
     test('throws when user lacks one of AND roles', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasRole')->with(1, 'admin')->once()->andReturn(true);
-        $resolver->shouldReceive('hasRole')->with(1, 'superadmin')->once()->andReturn(false);
+        $resolver->shouldReceive('hasRole')->with(1, 'admin', 'web')->once()->andReturn(true);
+        $resolver->shouldReceive('hasRole')->with(1, 'superadmin', 'web')->once()->andReturn(false);
 
         $user = new User();
         $user->id = 1;
@@ -181,7 +181,7 @@ describe('RoleMiddleware', function () {
 describe('RoleOrPermissionMiddleware', function () {
     test('allows request when user has matching permission', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasPermission')->with(1, 'users.create')->once()->andReturn(true);
+        $resolver->shouldReceive('hasPermission')->with(1, 'users.create', 'web')->once()->andReturn(true);
 
         $user = new User();
         $user->id = 1;
@@ -194,8 +194,8 @@ describe('RoleOrPermissionMiddleware', function () {
 
     test('allows request when user has matching role', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasPermission')->with(1, 'admin')->once()->andReturn(false);
-        $resolver->shouldReceive('hasRole')->with(1, 'admin')->once()->andReturn(true);
+        $resolver->shouldReceive('hasPermission')->with(1, 'admin', 'web')->once()->andReturn(false);
+        $resolver->shouldReceive('hasRole')->with(1, 'admin', 'web')->once()->andReturn(true);
 
         $user = new User();
         $user->id = 1;
@@ -208,8 +208,8 @@ describe('RoleOrPermissionMiddleware', function () {
 
     test('throws when user has neither role nor permission', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasPermission')->with(1, 'admin')->once()->andReturn(false);
-        $resolver->shouldReceive('hasRole')->with(1, 'admin')->once()->andReturn(false);
+        $resolver->shouldReceive('hasPermission')->with(1, 'admin', 'web')->once()->andReturn(false);
+        $resolver->shouldReceive('hasRole')->with(1, 'admin', 'web')->once()->andReturn(false);
 
         $user = new User();
         $user->id = 1;
@@ -225,11 +225,27 @@ describe('RoleOrPermissionMiddleware', function () {
         $middleware->handle(makeRequestWithUser(), passThrough(), 'admin');
     })->throws(UnauthorizedException::class, 'User is not authenticated.');
 
+    test('throws when user lacks one of AND items (neither role nor permission)', function () {
+        $resolver = Mockery::mock(PermissionResolverInterface::class);
+        // First item passes (has the role)
+        $resolver->shouldReceive('hasPermission')->with(1, 'admin', 'web')->once()->andReturn(false);
+        $resolver->shouldReceive('hasRole')->with(1, 'admin', 'web')->once()->andReturn(true);
+        // Second item fails both checks
+        $resolver->shouldReceive('hasPermission')->with(1, 'superadmin', 'web')->once()->andReturn(false);
+        $resolver->shouldReceive('hasRole')->with(1, 'superadmin', 'web')->once()->andReturn(false);
+
+        $user = new User();
+        $user->id = 1;
+
+        $middleware = new RoleOrPermissionMiddleware($resolver);
+        $middleware->handle(makeRequestWithUser($user), passThrough(), 'admin&superadmin');
+    })->throws(UnauthorizedException::class);
+
     test('requires all items with AND operator (&)', function () {
         $resolver = Mockery::mock(PermissionResolverInterface::class);
-        $resolver->shouldReceive('hasPermission')->with(1, 'admin')->once()->andReturn(false);
-        $resolver->shouldReceive('hasRole')->with(1, 'admin')->once()->andReturn(true);
-        $resolver->shouldReceive('hasPermission')->with(1, 'users.create')->once()->andReturn(true);
+        $resolver->shouldReceive('hasPermission')->with(1, 'admin', 'web')->once()->andReturn(false);
+        $resolver->shouldReceive('hasRole')->with(1, 'admin', 'web')->once()->andReturn(true);
+        $resolver->shouldReceive('hasPermission')->with(1, 'users.create', 'web')->once()->andReturn(true);
 
         $user = new User();
         $user->id = 1;

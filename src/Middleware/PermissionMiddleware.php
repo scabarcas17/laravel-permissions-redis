@@ -28,12 +28,13 @@ class PermissionMiddleware
 
         /** @var int $userId */
         $userId = $user->getAuthIdentifier();
+        $guardName = $guard ?? auth()->getDefaultDriver();
 
         if (str_contains($permission, '&')) {
             $permissions = array_map('trim', explode('&', $permission));
 
             foreach ($permissions as $perm) {
-                if (!$this->resolver->hasPermission($userId, $perm)) {
+                if (!$this->resolver->hasPermission($userId, $perm, $guardName)) {
                     throw UnauthorizedException::forPermissions($permissions);
                 }
             }
@@ -44,7 +45,7 @@ class PermissionMiddleware
         $permissions = explode('|', $permission);
 
         foreach ($permissions as $perm) {
-            if ($this->resolver->hasPermission($userId, $perm)) {
+            if ($this->resolver->hasPermission($userId, $perm, $guardName)) {
                 return $next($request);
             }
         }

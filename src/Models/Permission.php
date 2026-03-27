@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Scabarcas\LaravelPermissionsRedis\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use InvalidArgumentException;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 
 /**
@@ -16,10 +17,15 @@ use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
  */
 class Permission extends Model
 {
-    protected $guarded = ['id'];
+    /** @var list<string> */
+    protected $fillable = ['name', 'description', 'group', 'guard_name'];
 
     public static function findOrCreate(string $name, string $guardName = 'web', ?string $group = null): static
     {
+        if (str_contains($name, '|')) {
+            throw new InvalidArgumentException("Permission name cannot contain the '|' character.");
+        }
+
         /** @var static $permission */
         $permission = static::query()->firstOrCreate(
             ['name' => $name, 'guard_name' => $guardName],
@@ -42,13 +48,25 @@ class Permission extends Model
         static::updated(function (Permission $permission): void {
             /** @var AuthorizationCacheManager $cacheManager */
             $cacheManager = app(AuthorizationCacheManager::class);
-            $cacheManager->warmAll();
+            $cacheManager->warmPermissionAffectedUsers($permission->id);
+        });
+
+        static::deleting(function (Permission $permission): void {
+            /** @var AuthorizationCacheManager $cacheManager */
+            $cacheManager = app(AuthorizationCacheManager::class);
+            $permission->setAttribute('_affected_user_ids', $cacheManager->getUserIdsAffectedByPermission($permission->id));
         });
 
         static::deleted(function (Permission $permission): void {
             /** @var AuthorizationCacheManager $cacheManager */
             $cacheManager = app(AuthorizationCacheManager::class);
-            $cacheManager->warmAll();
+
+            /** @var array<int> $affectedUserIds */
+            $affectedUserIds = $permission->getAttribute('_affected_user_ids') ?? [];
+
+            foreach ($affectedUserIds as $userId) {
+                $cacheManager->warmUser($userId);
+            }
         });
     }
 }

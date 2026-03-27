@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Redis;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
@@ -34,8 +35,8 @@ test('permissions-redis:warm warms all users and roles', function () {
         ->expectsOutputToContain('warmed successfully')
         ->assertSuccessful();
 
-    expect($this->repo->getUserPermissions($user->id))->toContain('users.create')
-        ->and($this->repo->getUserRoles($user->id))->toContain('admin');
+    expect($this->repo->getUserPermissions($user->id))->toContain('web|users.create')
+        ->and($this->repo->getUserRoles($user->id))->toContain('web|admin');
 });
 
 test('permissions-redis:warm-user warms specific user', function () {
@@ -55,7 +56,34 @@ test('permissions-redis:warm-user warms specific user', function () {
         ->expectsOutputToContain("Warming authorization cache for user {$user->id}")
         ->assertSuccessful();
 
-    expect($this->repo->getUserPermissions($user->id))->toContain('posts.edit');
+    expect($this->repo->getUserPermissions($user->id))->toContain('web|posts.edit');
+});
+
+test('permissions-redis:warm with --no-flush preserves existing cache', function () {
+    // Pre-populate some cache data
+    $this->repo->setUserPermissions(999, ['stale.data']);
+
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+
+    $roleId = DB::table('roles')->insertGetId(['name' => 'admin', 'guard_name' => 'web']);
+    $permId = DB::table('permissions')->insertGetId(['name' => 'users.create', 'guard_name' => 'web']);
+
+    DB::table('role_has_permissions')->insert(['role_id' => $roleId, 'permission_id' => $permId]);
+    DB::table('model_has_roles')->insert([
+        'role_id'    => $roleId,
+        'model_id'   => $user->id,
+        'model_type' => User::class,
+    ]);
+
+    $this->artisan('permissions-redis:warm --no-flush')
+        ->expectsOutputToContain('Rewarming authorization cache (no flush)')
+        ->expectsOutputToContain('warmed successfully')
+        ->assertSuccessful();
+
+    // Stale data preserved (no flush happened)
+    expect($this->repo->getUserPermissions(999))->toContain('stale.data')
+        // Real user warmed
+        ->and($this->repo->getUserPermissions($user->id))->toContain('web|users.create');
 });
 
 test('permissions-redis:flush clears all cache when confirmed', function () {
@@ -79,4 +107,26 @@ test('permissions-redis:flush aborts when not confirmed', function () {
         ->assertSuccessful();
 
     expect($this->repo->getUserPermissions(1))->toContain('test.perm');
+});
+
+test('permissions-redis:stats displays cache statistics', function () {
+    $connection = Mockery::mock(\Illuminate\Redis\Connections\Connection::class);
+
+    // Scan returns some keys, then finishes
+    $connection->shouldReceive('command')
+        ->with('scan', ['0', 'match', 'auth:*', 'count', 100])
+        ->once()
+        ->andReturn(['0', [
+            'auth:user:1:permissions',
+            'auth:user:1:roles',
+            'auth:user:2:permissions',
+            'auth:user:2:roles',
+            'auth:role:1:permissions',
+            'auth:role:1:users',
+        ]]);
+
+    Redis::shouldReceive('connection')->with('default')->andReturn($connection);
+
+    $this->artisan('permissions-redis:stats')
+        ->assertSuccessful();
 });

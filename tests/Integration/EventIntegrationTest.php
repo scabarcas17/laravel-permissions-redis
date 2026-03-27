@@ -7,6 +7,7 @@ use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
 use Scabarcas\LaravelPermissionsRedis\Events\RoleDeleted;
+use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
 use Scabarcas\LaravelPermissionsRedis\Events\UserDeleted;
 use Scabarcas\LaravelPermissionsRedis\Listeners\CacheInvalidator;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
@@ -39,7 +40,7 @@ test('CacheInvalidator is registered as event subscriber', function () {
     // Dispatch PermissionsSynced - should re-warm role and affected users
     event(new PermissionsSynced($role));
 
-    expect($this->repo->getUserPermissions($user->id))->toContain('test.perm');
+    expect($this->repo->getUserPermissions($user->id))->toContain('web|test.perm');
 });
 
 test('UserDeleted event clears user cache', function () {
@@ -49,6 +50,27 @@ test('UserDeleted event clears user cache', function () {
     event(new UserDeleted(99));
 
     expect($this->repo->userCacheExists(99))->toBeFalse();
+});
+
+test('RolesAssigned event warms user and recomputes role indexes', function () {
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+    $role = Role::create(['name' => 'admin', 'guard_name' => 'web']);
+
+    $permId = DB::table('permissions')->insertGetId(['name' => 'test.perm', 'guard_name' => 'web']);
+    DB::table('role_has_permissions')->insert(['role_id' => $role->id, 'permission_id' => $permId]);
+    DB::table('model_has_roles')->insert([
+        'role_id'    => $role->id,
+        'model_id'   => $user->id,
+        'model_type' => User::class,
+    ]);
+
+    event(new RolesAssigned($user));
+
+    // warmUser populates permissions and roles
+    expect($this->repo->getUserPermissions($user->id))->toContain('web|test.perm')
+        ->and($this->repo->getUserRoles($user->id))->toContain('web|admin')
+        // rewarmUserRoleIndexes warms role cache with user reverse index
+        ->and($this->repo->getRoleUserIds($role->id))->toContain($user->id);
 });
 
 test('RoleDeleted event clears role cache and recomputes affected users', function () {

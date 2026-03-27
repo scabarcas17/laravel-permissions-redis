@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Scabarcas\LaravelPermissionsRedis\Listeners;
 
 use Illuminate\Events\Dispatcher;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Concerns\LogsMessages;
@@ -97,13 +96,13 @@ class CacheInvalidator
         /** @var string $table */
         $table = config('permissions-redis.tables.model_has_roles', 'model_has_roles');
 
-        /** @var Collection<int, int> $roleIds */
         $roleIds = DB::table($table)
             ->where('model_id', $userId)
             ->where('model_type', $userModel)
             ->pluck('role_id');
 
         foreach ($roleIds as $roleId) {
+            /** @var int $roleId */
             $this->cacheManager->warmRole($roleId);
         }
     }

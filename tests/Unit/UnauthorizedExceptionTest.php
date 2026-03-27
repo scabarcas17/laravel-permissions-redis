@@ -4,30 +4,27 @@ declare(strict_types=1);
 
 use Scabarcas\LaravelPermissionsRedis\Exceptions\UnauthorizedException;
 
-test('forPermissions creates 403 with permissions list', function () {
+test('forPermissions creates 403 with generic message and required items', function () {
     $exception = UnauthorizedException::forPermissions(['users.create', 'users.edit']);
 
     expect($exception->getStatusCode())->toBe(403)
-        ->and($exception->getMessage())->toContain('users.create')
-        ->and($exception->getMessage())->toContain('users.edit')
+        ->and($exception->getMessage())->toBe('User does not have the required permissions.')
         ->and($exception->getRequiredItems())->toBe(['users.create', 'users.edit']);
 });
 
-test('forRoles creates 403 with roles list', function () {
+test('forRoles creates 403 with generic message and required items', function () {
     $exception = UnauthorizedException::forRoles(['admin', 'editor']);
 
     expect($exception->getStatusCode())->toBe(403)
-        ->and($exception->getMessage())->toContain('admin')
-        ->and($exception->getMessage())->toContain('editor')
+        ->and($exception->getMessage())->toBe('User does not have the required roles.')
         ->and($exception->getRequiredItems())->toBe(['admin', 'editor']);
 });
 
-test('forRolesOrPermissions creates 403 with combined list', function () {
+test('forRolesOrPermissions creates 403 with generic message and required items', function () {
     $exception = UnauthorizedException::forRolesOrPermissions(['admin', 'users.create']);
 
     expect($exception->getStatusCode())->toBe(403)
-        ->and($exception->getMessage())->toContain('admin')
-        ->and($exception->getMessage())->toContain('users.create')
+        ->and($exception->getMessage())->toBe('User does not have any of the required roles or permissions.')
         ->and($exception->getRequiredItems())->toBe(['admin', 'users.create']);
 });
 

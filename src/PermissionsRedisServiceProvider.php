@@ -112,7 +112,9 @@ class PermissionsRedisServiceProvider extends ServiceProvider
             /** @var int $userId */
             $userId = $user->getAuthIdentifier();
 
-            if ($resolver->hasPermission($userId, $ability)) {
+            $guard = auth()->getDefaultDriver();
+
+            if ($resolver->hasPermission($userId, $ability, $guard)) {
                 return true;
             }
 

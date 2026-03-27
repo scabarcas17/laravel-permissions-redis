@@ -28,12 +28,13 @@ class RoleOrPermissionMiddleware
 
         /** @var int $userId */
         $userId = $user->getAuthIdentifier();
+        $guardName = $guard ?? auth()->getDefaultDriver();
 
         if (str_contains($roleOrPermission, '&')) {
             $items = array_map('trim', explode('&', $roleOrPermission));
 
             foreach ($items as $item) {
-                if (!$this->resolver->hasPermission($userId, $item) && !$this->resolver->hasRole($userId, $item)) {
+                if (!$this->resolver->hasPermission($userId, $item, $guardName) && !$this->resolver->hasRole($userId, $item, $guardName)) {
                     throw UnauthorizedException::forRolesOrPermissions($items);
                 }
             }
@@ -44,11 +45,7 @@ class RoleOrPermissionMiddleware
         $rolesOrPermissions = explode('|', $roleOrPermission);
 
         foreach ($rolesOrPermissions as $item) {
-            if ($this->resolver->hasPermission($userId, $item)) {
-                return $next($request);
-            }
-
-            if ($this->resolver->hasRole($userId, $item)) {
+            if ($this->resolver->hasPermission($userId, $item, $guardName) || $this->resolver->hasRole($userId, $item, $guardName)) {
                 return $next($request);
             }
         }

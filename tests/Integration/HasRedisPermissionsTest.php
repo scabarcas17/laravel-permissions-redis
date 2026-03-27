@@ -10,6 +10,8 @@ use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
 use Scabarcas\LaravelPermissionsRedis\Models\Permission;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\TestPermissionEnum;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\TestRoleEnum;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -260,4 +262,312 @@ test('assignRole returns self for chaining', function () {
     $result = $this->user->assignRole('editor');
 
     expect($result)->toBe($this->user);
+});
+
+// ─── BackedEnum support ───
+
+test('hasPermissionTo accepts BackedEnum', function () {
+    expect($this->user->hasPermissionTo(TestPermissionEnum::Create))->toBeTrue()
+        ->and($this->user->hasPermissionTo(TestPermissionEnum::Edit))->toBeTrue();
+});
+
+test('hasAnyPermission accepts BackedEnum', function () {
+    expect($this->user->hasAnyPermission(TestPermissionEnum::Create, TestPermissionEnum::Edit))->toBeTrue();
+});
+
+test('hasRole accepts BackedEnum', function () {
+    expect($this->user->hasRole(TestRoleEnum::Admin))->toBeTrue()
+        ->and($this->user->hasRole(TestRoleEnum::Editor))->toBeFalse();
+});
+
+test('hasRole accepts integer role ID', function () {
+    expect($this->user->hasRole($this->adminRole->id))->toBeTrue()
+        ->and($this->user->hasRole($this->editorRole->id))->toBeFalse();
+});
+
+test('hasRole with array returns false when none match', function () {
+    expect($this->user->hasRole(['editor', 'viewer']))->toBeFalse();
+});
+
+test('hasRole with Collection returns true when one matches', function () {
+    expect($this->user->hasRole(collect(['editor', 'admin'])))->toBeTrue();
+});
+
+test('assignRole accepts integer role ID', function () {
+    Event::fake([RolesAssigned::class]);
+
+    $this->user->assignRole($this->editorRole->id);
+
+    $this->assertDatabaseHas('model_has_roles', [
+        'role_id'    => $this->editorRole->id,
+        'model_id'   => $this->user->id,
+        'model_type' => User::class,
+    ]);
+});
+
+test('assignRole accepts BackedEnum', function () {
+    Event::fake([RolesAssigned::class]);
+
+    $this->user->assignRole(TestRoleEnum::Editor);
+
+    $this->assertDatabaseHas('model_has_roles', [
+        'role_id'    => $this->editorRole->id,
+        'model_id'   => $this->user->id,
+        'model_type' => User::class,
+    ]);
+});
+
+test('givePermissionTo accepts integer permission ID', function () {
+    $specialPerm = Permission::create(['name' => 'special.access', 'guard_name' => 'web']);
+
+    $this->user->givePermissionTo($specialPerm->id);
+
+    $this->assertDatabaseHas('model_has_permissions', [
+        'permission_id' => $specialPerm->id,
+        'model_id'      => $this->user->id,
+        'model_type'    => User::class,
+    ]);
+});
+
+test('givePermissionTo accepts BackedEnum', function () {
+    $this->user->givePermissionTo(TestPermissionEnum::Create);
+
+    $this->assertDatabaseHas('model_has_permissions', [
+        'permission_id' => $this->createPerm->id,
+        'model_id'      => $this->user->id,
+        'model_type'    => User::class,
+    ]);
+});
+
+// ─── Scopes with integer IDs ───
+
+test('assignRole handles float via catch-all cast', function () {
+    Event::fake([RolesAssigned::class]);
+
+    $this->user->assignRole(floatval($this->editorRole->id));
+
+    $this->assertDatabaseHas('model_has_roles', [
+        'role_id'    => $this->editorRole->id,
+        'model_id'   => $this->user->id,
+        'model_type' => User::class,
+    ]);
+});
+
+test('givePermissionTo handles float via catch-all cast', function () {
+    $specialPerm = Permission::create(['name' => 'special.access', 'guard_name' => 'web']);
+
+    $this->user->givePermissionTo(floatval($specialPerm->id));
+
+    $this->assertDatabaseHas('model_has_permissions', [
+        'permission_id' => $specialPerm->id,
+        'model_id'      => $this->user->id,
+        'model_type'    => User::class,
+    ]);
+});
+
+test('scopeRole accepts integer role ID', function () {
+    $result = User::query()->role($this->adminRole->id)->get();
+
+    expect($result)->toHaveCount(1)
+        ->and($result->first()->id)->toBe($this->user->id);
+});
+
+test('scopePermission accepts integer permission ID', function () {
+    $result = User::query()->permission($this->createPerm->id)->get();
+
+    expect($result)->toHaveCount(1)
+        ->and($result->first()->id)->toBe($this->user->id);
+});
+
+// ─── forGuard() fluent API ───
+
+test('forGuard sets guard for hasPermissionTo', function () {
+    // User has web|users.create but NOT api|users.create
+    expect($this->user->forGuard('web')->hasPermissionTo('users.create'))->toBeTrue()
+        ->and($this->user->forGuard('api')->hasPermissionTo('users.create'))->toBeFalse();
+});
+
+test('forGuard auto-resets after use', function () {
+    // After forGuard('api') is consumed, next call should use default guard (web)
+    $this->user->forGuard('api');
+    $this->user->hasPermissionTo('users.create'); // consumes 'api'
+
+    // Next call should use default guard (web), not 'api'
+    expect($this->user->hasPermissionTo('users.create'))->toBeTrue();
+});
+
+test('explicit guardName parameter takes precedence over forGuard', function () {
+    // forGuard('api') but explicit 'web' should win
+    expect($this->user->forGuard('api')->hasPermissionTo('users.create', 'web'))->toBeTrue();
+});
+
+test('forGuard works with hasAnyPermission', function () {
+    expect($this->user->forGuard('web')->hasAnyPermission('users.create', 'users.edit'))->toBeTrue()
+        ->and($this->user->forGuard('api')->hasAnyPermission('users.create', 'users.edit'))->toBeFalse();
+});
+
+test('forGuard works with hasAllPermissions', function () {
+    expect($this->user->forGuard('web')->hasAllPermissions('users.create', 'users.edit'))->toBeTrue()
+        ->and($this->user->forGuard('api')->hasAllPermissions('users.create', 'users.edit'))->toBeFalse();
+});
+
+test('forGuard works with hasRole', function () {
+    expect($this->user->forGuard('web')->hasRole('admin'))->toBeTrue()
+        ->and($this->user->forGuard('api')->hasRole('admin'))->toBeFalse();
+});
+
+test('forGuard works with hasAnyRole', function () {
+    expect($this->user->forGuard('web')->hasAnyRole('admin', 'editor'))->toBeTrue()
+        ->and($this->user->forGuard('api')->hasAnyRole('admin', 'editor'))->toBeFalse();
+});
+
+test('forGuard works with hasAllRoles', function () {
+    DB::table('model_has_roles')->insert([
+        'role_id'    => $this->editorRole->id,
+        'model_id'   => $this->user->id,
+        'model_type' => User::class,
+    ]);
+    app(AuthorizationCacheManager::class)->warmUser($this->user->id);
+
+    expect($this->user->forGuard('web')->hasAllRoles('admin', 'editor'))->toBeTrue()
+        ->and($this->user->forGuard('api')->hasAllRoles('admin', 'editor'))->toBeFalse();
+});
+
+test('forGuard works with getAllPermissions', function () {
+    $webPerms = $this->user->forGuard('web')->getAllPermissions();
+    $apiPerms = $this->user->forGuard('api')->getAllPermissions();
+
+    expect($webPerms)->toHaveCount(3)
+        ->and($apiPerms)->toHaveCount(0);
+});
+
+test('forGuard works with getPermissionNames', function () {
+    $webNames = $this->user->forGuard('web')->getPermissionNames();
+    $apiNames = $this->user->forGuard('api')->getPermissionNames();
+
+    expect($webNames->sort()->values()->all())->toBe(['users.create', 'users.delete', 'users.edit'])
+        ->and($apiNames->all())->toBe([]);
+});
+
+test('forGuard works with getRoleNames', function () {
+    $webRoles = $this->user->forGuard('web')->getRoleNames();
+    $apiRoles = $this->user->forGuard('api')->getRoleNames();
+
+    expect($webRoles->all())->toBe(['admin'])
+        ->and($apiRoles->all())->toBe([]);
+});
+
+test('forGuard works with assignRole for non-default guard', function () {
+    Event::fake([RolesAssigned::class]);
+
+    $apiRole = Role::create(['name' => 'api-editor', 'guard_name' => 'api']);
+
+    $this->user->forGuard('api')->assignRole('api-editor');
+
+    $this->assertDatabaseHas('model_has_roles', [
+        'role_id'    => $apiRole->id,
+        'model_id'   => $this->user->id,
+        'model_type' => User::class,
+    ]);
+});
+
+test('forGuard works with syncRoles for non-default guard', function () {
+    Event::fake([RolesAssigned::class]);
+
+    $apiAdmin = Role::create(['name' => 'admin', 'guard_name' => 'api']);
+    $apiEditor = Role::create(['name' => 'editor', 'guard_name' => 'api']);
+
+    // Assign api admin first
+    $this->user->forGuard('api')->assignRole('admin');
+
+    // Sync to only api editor
+    $this->user->forGuard('api')->syncRoles(['editor']);
+
+    $this->assertDatabaseMissing('model_has_roles', [
+        'role_id'  => $apiAdmin->id,
+        'model_id' => $this->user->id,
+    ]);
+
+    $this->assertDatabaseHas('model_has_roles', [
+        'role_id'  => $apiEditor->id,
+        'model_id' => $this->user->id,
+    ]);
+});
+
+test('forGuard works with removeRole for non-default guard', function () {
+    Event::fake([RolesAssigned::class]);
+
+    $apiRole = Role::create(['name' => 'api-admin', 'guard_name' => 'api']);
+
+    $this->user->forGuard('api')->assignRole('api-admin');
+    $this->user->forGuard('api')->removeRole('api-admin');
+
+    $this->assertDatabaseMissing('model_has_roles', [
+        'role_id'  => $apiRole->id,
+        'model_id' => $this->user->id,
+    ]);
+});
+
+test('forGuard works with givePermissionTo for non-default guard', function () {
+    $apiPerm = Permission::create(['name' => 'api.access', 'guard_name' => 'api']);
+
+    $this->user->forGuard('api')->givePermissionTo('api.access');
+
+    $this->assertDatabaseHas('model_has_permissions', [
+        'permission_id' => $apiPerm->id,
+        'model_id'      => $this->user->id,
+        'model_type'    => User::class,
+    ]);
+});
+
+test('forGuard works with revokePermissionTo for non-default guard', function () {
+    $apiPerm = Permission::create(['name' => 'api.access', 'guard_name' => 'api']);
+
+    $this->user->forGuard('api')->givePermissionTo('api.access');
+    $this->user->forGuard('api')->revokePermissionTo('api.access');
+
+    $this->assertDatabaseMissing('model_has_permissions', [
+        'permission_id' => $apiPerm->id,
+        'model_id'      => $this->user->id,
+    ]);
+});
+
+test('forGuard works with syncPermissions for non-default guard', function () {
+    $apiPerm1 = Permission::create(['name' => 'api.read', 'guard_name' => 'api']);
+    $apiPerm2 = Permission::create(['name' => 'api.write', 'guard_name' => 'api']);
+
+    $this->user->forGuard('api')->givePermissionTo('api.read');
+    $this->user->forGuard('api')->syncPermissions(['api.write']);
+
+    $this->assertDatabaseMissing('model_has_permissions', [
+        'permission_id' => $apiPerm1->id,
+        'model_id'      => $this->user->id,
+    ]);
+
+    $this->assertDatabaseHas('model_has_permissions', [
+        'permission_id' => $apiPerm2->id,
+        'model_id'      => $this->user->id,
+    ]);
+});
+
+test('forGuard does not affect subsequent operations', function () {
+    Event::fake([RolesAssigned::class]);
+
+    $apiRole = Role::create(['name' => 'api-viewer', 'guard_name' => 'api']);
+
+    // First call uses api guard
+    $this->user->forGuard('api')->assignRole('api-viewer');
+
+    // Second call without forGuard should use default (web)
+    $this->user->assignRole('editor');
+
+    $this->assertDatabaseHas('model_has_roles', [
+        'role_id'  => $apiRole->id,
+        'model_id' => $this->user->id,
+    ]);
+
+    $this->assertDatabaseHas('model_has_roles', [
+        'role_id'  => $this->editorRole->id,
+        'model_id' => $this->user->id,
+    ]);
 });

@@ -27,90 +27,81 @@ class PermissionResolver implements PermissionResolverInterface
     /** @var array<int, array<string>|null> */
     private array $allRolesCache = [];
 
+    /** @var array<int, bool> */
+    private array $superAdminCache = [];
+
     public function __construct(
         private readonly PermissionRepositoryInterface $repository,
         private readonly AuthorizationCacheManager $cacheManager,
     ) {
     }
 
-    public function hasPermission(int $userId, string $permission): bool
+    public function hasPermission(int $userId, string $permission, ?string $guard = null): bool
     {
+        $guard = $this->resolveGuard($guard);
+        $cacheKey = "{$guard}|{$permission}";
+
         if ($this->isSuperAdmin($userId)) {
             return true;
         }
 
-        if (isset($this->permissionCache[$userId][$permission])) {
-            return $this->permissionCache[$userId][$permission];
+        if (isset($this->permissionCache[$userId][$cacheKey])) {
+            return $this->permissionCache[$userId][$cacheKey];
         }
 
         $this->ensureUserCacheExists($userId);
 
-        $result = $this->repository->userHasPermission($userId, $permission);
+        $result = $this->repository->userHasPermission($userId, $cacheKey);
 
         if (!$result && $this->wildcardEnabled()) {
-            $result = $this->matchWildcard($userId, $permission);
+            $result = $this->matchWildcard($userId, $permission, $guard);
         }
 
-        $this->permissionCache[$userId][$permission] = $result;
+        $this->permissionCache[$userId][$cacheKey] = $result;
 
         return $result;
     }
 
-    public function hasRole(int $userId, string $role): bool
+    public function hasRole(int $userId, string $role, ?string $guard = null): bool
     {
-        if (isset($this->roleCache[$userId][$role])) {
-            return $this->roleCache[$userId][$role];
+        $guard = $this->resolveGuard($guard);
+        $cacheKey = "{$guard}|{$role}";
+
+        if (isset($this->roleCache[$userId][$cacheKey])) {
+            return $this->roleCache[$userId][$cacheKey];
         }
 
         $this->ensureUserCacheExists($userId);
 
-        $result = $this->repository->userHasRole($userId, $role);
+        $result = $this->repository->userHasRole($userId, $cacheKey);
 
-        $this->roleCache[$userId][$role] = $result;
+        $this->roleCache[$userId][$cacheKey] = $result;
 
         return $result;
     }
 
     /** @return Collection<int, PermissionDTO> */
-    public function getAllPermissions(int $userId): Collection
+    public function getAllPermissions(int $userId, ?string $guard = null): Collection
     {
-        if (isset($this->allPermissionsCache[$userId])) {
-            return collect($this->allPermissionsCache[$userId])
-                ->map(fn (string $name): PermissionDTO => new PermissionDTO(name: $name));
-        }
-
-        $this->ensureUserCacheExists($userId);
-
-        $names = $this->repository->getUserPermissions($userId);
-
-        $this->allPermissionsCache[$userId] = $names;
-
-        foreach ($names as $name) {
-            $this->permissionCache[$userId][$name] = true;
-        }
+        $names = $this->loadUserPermissions($userId);
 
         return collect($names)
-            ->map(fn (string $name): PermissionDTO => new PermissionDTO(name: $name));
+            ->map(fn (string $encoded): array => $this->decodeEntry($encoded))
+            ->when($guard !== null, fn (Collection $c) => $c->filter(fn (array $entry): bool => $entry[0] === $guard))
+            ->map(fn (array $entry): PermissionDTO => new PermissionDTO(name: $entry[1], guard: $entry[0]))
+            ->values();
     }
 
     /** @return Collection<int, string> */
-    public function getAllRoles(int $userId): Collection
+    public function getAllRoles(int $userId, ?string $guard = null): Collection
     {
-        if (isset($this->allRolesCache[$userId])) {
-            return collect($this->allRolesCache[$userId]);
-        }
+        $roles = $this->loadUserRoles($userId);
 
-        $this->ensureUserCacheExists($userId);
-
-        $roles = $this->repository->getUserRoles($userId);
-
-        $this->allRolesCache[$userId] = $roles;
-
-        foreach ($roles as $role) {
-            $this->roleCache[$userId][$role] = true;
-        }
-
-        return collect($roles);
+        return collect($roles)
+            ->map(fn (string $encoded): array => $this->decodeEntry($encoded))
+            ->when($guard !== null, fn (Collection $c) => $c->filter(fn (array $entry): bool => $entry[0] === $guard))
+            ->map(fn (array $entry): string => $entry[1])
+            ->values();
     }
 
     public function flush(): void
@@ -119,6 +110,7 @@ class PermissionResolver implements PermissionResolverInterface
         $this->roleCache = [];
         $this->allPermissionsCache = [];
         $this->allRolesCache = [];
+        $this->superAdminCache = [];
     }
 
     public function flushUser(int $userId): void
@@ -128,6 +120,7 @@ class PermissionResolver implements PermissionResolverInterface
             $this->roleCache[$userId],
             $this->allPermissionsCache[$userId],
             $this->allRolesCache[$userId],
+            $this->superAdminCache[$userId],
         );
     }
 
@@ -141,14 +134,57 @@ class PermissionResolver implements PermissionResolverInterface
 
     private function isSuperAdmin(int $userId): bool
     {
+        if (isset($this->superAdminCache[$userId])) {
+            return $this->superAdminCache[$userId];
+        }
+
         /** @var string|null $superAdminRole */
         $superAdminRole = config('permissions-redis.super_admin_role');
 
         if ($superAdminRole === null) {
+            $this->superAdminCache[$userId] = false;
+
             return false;
         }
 
-        return $this->hasRole($userId, $superAdminRole);
+        $this->ensureUserCacheExists($userId);
+
+        $defaultGuard = $this->resolveGuard(null);
+
+        // Check the current guard first (most common case), then remaining guards
+        if ($this->repository->userHasRole($userId, "{$defaultGuard}|{$superAdminRole}")) {
+            $this->superAdminCache[$userId] = true;
+
+            return true;
+        }
+
+        /** @var array<string, array<string, mixed>> $guards */
+        $guards = config('auth.guards', ['web' => []]);
+
+        foreach (array_keys($guards) as $guard) {
+            if ($guard === $defaultGuard) {
+                continue;
+            }
+
+            if ($this->repository->userHasRole($userId, "{$guard}|{$superAdminRole}")) {
+                $this->superAdminCache[$userId] = true;
+
+                return true;
+            }
+        }
+
+        $this->superAdminCache[$userId] = false;
+
+        return false;
+    }
+
+    private function resolveGuard(?string $guard): string
+    {
+        if ($guard !== null) {
+            return $guard;
+        }
+
+        return auth()->getDefaultDriver();
     }
 
     private function wildcardEnabled(): bool
@@ -159,16 +195,70 @@ class PermissionResolver implements PermissionResolverInterface
         return $enabled;
     }
 
-    private function matchWildcard(int $userId, string $permission): bool
+    private function matchWildcard(int $userId, string $permission, string $guard): bool
     {
-        $allPermissions = $this->repository->getUserPermissions($userId);
+        $allPermissions = $this->loadUserPermissions($userId);
 
         foreach ($allPermissions as $stored) {
-            if (str_contains($stored, '*') && fnmatch($stored, $permission)) {
+            [$storedGuard, $storedName] = $this->decodeEntry($stored);
+
+            if ($storedGuard === $guard && str_contains($storedName, '*') && fnmatch($storedName, $permission)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /** @return array<string> */
+    private function loadUserPermissions(int $userId): array
+    {
+        if (isset($this->allPermissionsCache[$userId])) {
+            return $this->allPermissionsCache[$userId];
+        }
+
+        $this->ensureUserCacheExists($userId);
+
+        $names = $this->repository->getUserPermissions($userId);
+        $this->allPermissionsCache[$userId] = $names;
+
+        foreach ($names as $encoded) {
+            $this->permissionCache[$userId][$encoded] = true;
+        }
+
+        return $names;
+    }
+
+    /** @return array<string> */
+    private function loadUserRoles(int $userId): array
+    {
+        if (isset($this->allRolesCache[$userId])) {
+            return $this->allRolesCache[$userId];
+        }
+
+        $this->ensureUserCacheExists($userId);
+
+        $roles = $this->repository->getUserRoles($userId);
+        $this->allRolesCache[$userId] = $roles;
+
+        foreach ($roles as $encoded) {
+            $this->roleCache[$userId][$encoded] = true;
+        }
+
+        return $roles;
+    }
+
+    /**
+     * @return array{0: string, 1: string}
+     */
+    private function decodeEntry(string $encoded): array
+    {
+        $parts = explode('|', $encoded, 2);
+
+        if (count($parts) === 2) {
+            return [$parts[0], $parts[1]];
+        }
+
+        return [auth()->getDefaultDriver(), $parts[0]];
     }
 }

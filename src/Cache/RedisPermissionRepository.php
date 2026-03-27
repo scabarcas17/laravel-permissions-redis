@@ -11,6 +11,12 @@ use Throwable;
 
 class RedisPermissionRepository implements PermissionRepositoryInterface
 {
+    private ?Connection $cachedConnection = null;
+
+    private ?string $cachedPrefix = null;
+
+    private ?int $cachedTtl = null;
+
     /**
      * @throws Throwable
      */
@@ -36,7 +42,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     /**
      * @throws Throwable
      *
-/** @return array<string>
+     * @return array<string>
      */
     public function getUserPermissions(int $userId): array
     {
@@ -51,7 +57,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     /**
      * @throws Throwable
      *
-/** @return array<string>
+     * @return array<string>
      */
     public function getUserRoles(int $userId): array
     {
@@ -66,7 +72,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     /**
      * @throws Throwable
      *
-/** @return array<int>
+     * @return array<int>
      */
     public function getRoleUserIds(int $roleId): array
     {
@@ -208,25 +214,34 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
 
     private function connection(): Connection
     {
-        /** @var string $connectionName */
-        $connectionName = config('permissions-redis.redis_connection', 'default');
+        if ($this->cachedConnection === null) {
+            /** @var string $connectionName */
+            $connectionName = config('permissions-redis.redis_connection', 'default');
+            $this->cachedConnection = Redis::connection($connectionName);
+        }
 
-        return Redis::connection($connectionName);
+        return $this->cachedConnection;
     }
 
     private function prefix(): string
     {
-        /** @var string $prefix */
-        $prefix = config('permissions-redis.prefix', 'auth:');
+        if ($this->cachedPrefix === null) {
+            /** @var string $prefix */
+            $prefix = config('permissions-redis.prefix', 'auth:');
+            $this->cachedPrefix = $prefix;
+        }
 
-        return $prefix;
+        return $this->cachedPrefix;
     }
 
     private function ttl(): int
     {
-        /** @var int $ttl */
-        $ttl = config('permissions-redis.ttl', 86400);
+        if ($this->cachedTtl === null) {
+            /** @var int $ttl */
+            $ttl = config('permissions-redis.ttl', 86400);
+            $this->cachedTtl = $ttl;
+        }
 
-        return $ttl;
+        return $this->cachedTtl;
     }
 }

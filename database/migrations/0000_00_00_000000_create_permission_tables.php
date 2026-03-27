@@ -20,6 +20,7 @@ return new class () extends Migration {
             $table->string('guard_name');
             $table->timestamps();
             $table->unique(['name', 'guard_name']);
+            $table->index('group');
         });
 
         // 2. roles table

@@ -21,19 +21,32 @@ use Scabarcas\LaravelPermissionsRedis\Models\Role;
  */
 trait HasRedisPermissions
 {
+    private ?string $guardOverride = null;
+
+    public function forGuard(string $guard): static
+    {
+        $this->guardOverride = $guard;
+
+        return $this;
+    }
+
     public function hasPermissionTo(string|BackedEnum $permission, ?string $guardName = null): bool
     {
+        $override = $this->consumeGuardOverride();
+        $guardName ??= $override;
+
         $permissionName = $permission instanceof BackedEnum ? (string) $permission->value : $permission;
 
-        return $this->getPermissionResolver()->hasPermission($this->id, $permissionName);
+        return $this->getPermissionResolver()->hasPermission($this->id, $permissionName, $guardName);
     }
 
     public function hasAnyPermission(mixed ...$permissions): bool
     {
+        $guard = $this->consumeGuardOverride();
         $permissions = $this->flattenPermissions($permissions);
 
         foreach ($permissions as $permission) {
-            if ($this->hasPermissionTo($permission)) {
+            if ($this->hasPermissionTo($permission, $guard)) {
                 return true;
             }
         }
@@ -43,10 +56,11 @@ trait HasRedisPermissions
 
     public function hasAllPermissions(mixed ...$permissions): bool
     {
+        $guard = $this->consumeGuardOverride();
         $permissions = $this->flattenPermissions($permissions);
 
         foreach ($permissions as $permission) {
-            if (!$this->hasPermissionTo($permission)) {
+            if (!$this->hasPermissionTo($permission, $guard)) {
                 return false;
             }
         }
@@ -59,24 +73,25 @@ trait HasRedisPermissions
      */
     public function hasRole(mixed $roles, ?string $guardName = null): bool
     {
-        if (is_string($roles)) {
-            return $this->getPermissionResolver()->hasRole($this->id, $roles);
-        }
+        $override = $this->consumeGuardOverride();
+        $guardName ??= $override;
 
-        if ($roles instanceof BackedEnum) {
-            return $this->getPermissionResolver()->hasRole($this->id, (string) $roles->value);
-        }
+        $items = match (true) {
+            is_string($roles), is_int($roles), $roles instanceof BackedEnum => [$roles],
+            $roles instanceof Collection => $roles->all(),
+            default                      => (array) $roles,
+        };
 
-        if (is_int($roles)) {
-            $roleName = Role::query()->where('id', $roles)->value('name');
-
-            return $roleName !== null && $this->getPermissionResolver()->hasRole($this->id, $roleName);
-        }
-
-        $items = $roles instanceof Collection ? $roles->all() : (array) $roles;
+        $resolver = $this->getPermissionResolver();
 
         foreach ($items as $role) {
-            if ($this->hasRole($role, $guardName)) {
+            $name = match (true) {
+                $role instanceof BackedEnum => (string) $role->value,
+                is_int($role)               => Role::query()->where('id', $role)->value('name'),
+                default                     => (string) $role,
+            };
+
+            if ($name !== null && $resolver->hasRole($this->id, $name, $guardName)) {
                 return true;
             }
         }
@@ -86,10 +101,11 @@ trait HasRedisPermissions
 
     public function hasAnyRole(mixed ...$roles): bool
     {
+        $guard = $this->consumeGuardOverride();
         $roles = is_array($roles[0] ?? null) ? $roles[0] : $roles;
 
         foreach ($roles as $role) {
-            if ($this->hasRole($role)) {
+            if ($this->hasRole($role, $guard)) {
                 return true;
             }
         }
@@ -99,10 +115,11 @@ trait HasRedisPermissions
 
     public function hasAllRoles(mixed ...$roles): bool
     {
+        $guard = $this->consumeGuardOverride();
         $roles = is_array($roles[0] ?? null) ? $roles[0] : $roles;
 
         foreach ($roles as $role) {
-            if (!$this->hasRole($role)) {
+            if (!$this->hasRole($role, $guard)) {
                 return false;
             }
         }
@@ -110,19 +127,28 @@ trait HasRedisPermissions
         return true;
     }
 
-    public function getAllPermissions(): Collection
+    public function getAllPermissions(?string $guard = null): Collection
     {
-        return $this->getPermissionResolver()->getAllPermissions($this->id);
+        $override = $this->consumeGuardOverride();
+        $guard ??= $override;
+
+        return $this->getPermissionResolver()->getAllPermissions($this->id, $guard);
     }
 
-    public function getPermissionNames(): Collection
+    public function getPermissionNames(?string $guard = null): Collection
     {
-        return $this->getAllPermissions()->pluck('name');
+        $override = $this->consumeGuardOverride();
+        $guard ??= $override;
+
+        return $this->getAllPermissions($guard)->pluck('name');
     }
 
-    public function getRoleNames(): Collection
+    public function getRoleNames(?string $guard = null): Collection
     {
-        return $this->getPermissionResolver()->getAllRoles($this->id);
+        $override = $this->consumeGuardOverride();
+        $guard ??= $override;
+
+        return $this->getPermissionResolver()->getAllRoles($this->id, $guard);
     }
 
     /**
@@ -130,7 +156,8 @@ trait HasRedisPermissions
      */
     public function assignRole(mixed ...$roles): static
     {
-        $roleIds = $this->resolveRoleIds($roles);
+        $guard = $this->consumeGuardOverride();
+        $roleIds = $this->resolveRoleIds($roles, $guard);
 
         $this->roles()->syncWithoutDetaching($roleIds);
 
@@ -144,9 +171,10 @@ trait HasRedisPermissions
      */
     public function syncRoles(mixed ...$roles): static
     {
+        $guard = $this->consumeGuardOverride();
         $roles = is_array($roles[0] ?? null) ? $roles[0] : $roles;
 
-        $roleIds = $this->resolveRoleIds($roles);
+        $roleIds = $this->resolveRoleIds($roles, $guard);
 
         $this->roles()->sync($roleIds);
 
@@ -157,7 +185,8 @@ trait HasRedisPermissions
 
     public function removeRole(mixed $role): static
     {
-        $roleIds = $this->resolveRoleIds([$role]);
+        $guard = $this->consumeGuardOverride();
+        $roleIds = $this->resolveRoleIds([$role], $guard);
 
         $this->roles()->detach($roleIds);
 
@@ -171,7 +200,8 @@ trait HasRedisPermissions
      */
     public function givePermissionTo(mixed ...$permissions): static
     {
-        $permissionIds = $this->resolvePermissionIds($permissions);
+        $guard = $this->consumeGuardOverride();
+        $permissionIds = $this->resolvePermissionIds($permissions, $guard);
 
         $this->permissions()->syncWithoutDetaching($permissionIds);
 
@@ -185,7 +215,8 @@ trait HasRedisPermissions
      */
     public function revokePermissionTo(mixed ...$permissions): static
     {
-        $permissionIds = $this->resolvePermissionIds($permissions);
+        $guard = $this->consumeGuardOverride();
+        $permissionIds = $this->resolvePermissionIds($permissions, $guard);
 
         $this->permissions()->detach($permissionIds);
 
@@ -199,7 +230,8 @@ trait HasRedisPermissions
      */
     public function syncPermissions(array $permissions): static
     {
-        $permissionIds = $this->resolvePermissionIds($permissions);
+        $guard = $this->consumeGuardOverride();
+        $permissionIds = $this->resolvePermissionIds($permissions, $guard);
 
         $this->permissions()->sync($permissionIds);
 
@@ -237,16 +269,10 @@ trait HasRedisPermissions
     {
         $roles = is_array($roles) ? $roles : [$roles];
 
-        $roleIds = collect($roles)->map(function (mixed $role): int {
-            if (is_int($role)) {
-                return $role;
-            }
+        /** @var string $guardName */
+        $guardName = $guard ?? config('auth.defaults.guard', 'web');
 
-            /** @var Role $model */
-            $model = Role::query()->where('name', $role)->firstOrFail();
-
-            return $model->id;
-        });
+        $roleIds = $this->batchResolveRoleIds($roles, $guardName);
 
         return $query->whereHas('roles', function ($q) use ($roleIds) {
             $q->whereIn('roles.id', $roleIds);
@@ -258,16 +284,10 @@ trait HasRedisPermissions
     {
         $permissions = is_array($permissions) ? $permissions : [$permissions];
 
-        $permissionIds = collect($permissions)->map(function (mixed $perm): int {
-            if (is_int($perm)) {
-                return $perm;
-            }
+        /** @var string $guardName */
+        $guardName = $guard ?? config('auth.defaults.guard', 'web');
 
-            /** @var Permission $model */
-            $model = Permission::query()->where('name', $perm)->firstOrFail();
-
-            return $model->id;
-        });
+        $permissionIds = $this->batchResolvePermissionIds($permissions, $guardName);
 
         return $query->where(function ($q) use ($permissionIds) {
             $q->whereHas('roles', function ($q) use ($permissionIds) {
@@ -278,6 +298,14 @@ trait HasRedisPermissions
                 $q->whereIn('permissions.id', $permissionIds);
             });
         });
+    }
+
+    private function consumeGuardOverride(): ?string
+    {
+        $guard = $this->guardOverride;
+        $this->guardOverride = null;
+
+        return $guard;
     }
 
     private function getPermissionResolver(): PermissionResolverInterface
@@ -293,60 +321,106 @@ trait HasRedisPermissions
      *
      * @return array<int>
      */
-    private function resolveRoleIds(array $roles): array
+    private function resolveRoleIds(array $roles, ?string $guard = null): array
     {
-        return collect($roles)
-            ->flatten()
-            ->map(function (mixed $role): int {
-                if (is_int($role)) {
-                    return $role;
-                }
+        /** @var string $defaultGuard */
+        $defaultGuard = $guard ?? config('auth.defaults.guard', 'web');
 
-                if ($role instanceof BackedEnum) {
-                    $role = (string) $role->value;
-                }
-
-                if (is_string($role)) {
-                    /** @var Role $model */
-                    $model = Role::query()->where('name', $role)->firstOrFail();
-
-                    return $model->id;
-                }
-
-                return (int) $role;
-            })
-            ->all();
+        return $this->batchResolveRoleIds(collect($roles)->flatten()->all(), $defaultGuard);
     }
 
     /**
+     * @param array<mixed> $permissions
+     *
      * @return array<int>
      */
-    private function resolvePermissionIds(array $permissions): array
+    private function resolvePermissionIds(array $permissions, ?string $guard = null): array
     {
-        return collect($permissions)
-            ->flatten()
-            ->map(function (mixed $permission): int {
-                if (is_int($permission)) {
-                    return $permission;
-                }
+        /** @var string $defaultGuard */
+        $defaultGuard = $guard ?? config('auth.defaults.guard', 'web');
 
-                if ($permission instanceof BackedEnum) {
-                    $permission = (string) $permission->value;
-                }
-
-                if (is_string($permission)) {
-                    /** @var Permission $model */
-                    $model = Permission::query()->where('name', $permission)->firstOrFail();
-
-                    return $model->id;
-                }
-
-                return (int) $permission;
-            })
-            ->all();
+        return $this->batchResolvePermissionIds(collect($permissions)->flatten()->all(), $defaultGuard);
     }
 
     /**
+     * Resolve a mixed list of role identifiers to IDs using a single query for names.
+     *
+     * @param array<mixed> $roles
+     *
+     * @return array<int>
+     */
+    private function batchResolveRoleIds(array $roles, string $guard): array
+    {
+        $intIds = [];
+        $names = [];
+
+        foreach ($roles as $role) {
+            if (is_int($role)) {
+                $intIds[] = $role;
+            } elseif ($role instanceof BackedEnum) {
+                $names[] = (string) $role->value;
+            } elseif (is_string($role)) {
+                $names[] = $role;
+            } else {
+                $intIds[] = (int) $role;
+            }
+        }
+
+        if ($names !== []) {
+            $resolved = Role::query()
+                ->where('guard_name', $guard)
+                ->whereIn('name', $names)
+                ->pluck('id')
+                ->map(fn ($id): int => (int) $id)
+                ->all();
+
+            $intIds = array_merge($intIds, $resolved);
+        }
+
+        return $intIds;
+    }
+
+    /**
+     * Resolve a mixed list of permission identifiers to IDs using a single query for names.
+     *
+     * @param array<mixed> $permissions
+     *
+     * @return array<int>
+     */
+    private function batchResolvePermissionIds(array $permissions, string $guard): array
+    {
+        $intIds = [];
+        $names = [];
+
+        foreach ($permissions as $permission) {
+            if (is_int($permission)) {
+                $intIds[] = $permission;
+            } elseif ($permission instanceof BackedEnum) {
+                $names[] = (string) $permission->value;
+            } elseif (is_string($permission)) {
+                $names[] = $permission;
+            } else {
+                $intIds[] = (int) $permission;
+            }
+        }
+
+        if ($names !== []) {
+            $resolved = Permission::query()
+                ->where('guard_name', $guard)
+                ->whereIn('name', $names)
+                ->pluck('id')
+                ->map(fn ($id): int => (int) $id)
+                ->all();
+
+            $intIds = array_merge($intIds, $resolved);
+        }
+
+        return $intIds;
+    }
+
+    /**
+     * @param array<mixed> $permissions
+     *
      * @return array<string>
      */
     private function flattenPermissions(array $permissions): array

@@ -9,17 +9,23 @@ use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 
 class WarmCacheCommand extends Command
 {
-    protected $signature = 'permissions-redis:warm';
+    protected $signature = 'permissions-redis:warm {--no-flush : Rewarm without flushing existing cache first}';
 
     protected $description = 'Warm the full authorization cache from database into Redis';
 
     public function handle(AuthorizationCacheManager $cacheManager): int
     {
-        $this->info('Warming authorization cache...');
+        $noFlush = $this->option('no-flush');
+
+        $this->info($noFlush ? 'Rewarming authorization cache (no flush)...' : 'Warming authorization cache...');
 
         $start = microtime(true);
 
-        $cacheManager->warmAll();
+        if ($noFlush) {
+            $cacheManager->rewarmAll();
+        } else {
+            $cacheManager->warmAll();
+        }
 
         $elapsed = round((microtime(true) - $start) * 1000);
 

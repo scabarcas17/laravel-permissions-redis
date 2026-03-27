@@ -28,12 +28,13 @@ class RoleMiddleware
 
         /** @var int $userId */
         $userId = $user->getAuthIdentifier();
+        $guardName = $guard ?? auth()->getDefaultDriver();
 
         if (str_contains($role, '&')) {
             $roles = array_map('trim', explode('&', $role));
 
             foreach ($roles as $r) {
-                if (!$this->resolver->hasRole($userId, $r)) {
+                if (!$this->resolver->hasRole($userId, $r, $guardName)) {
                     throw UnauthorizedException::forRoles($roles);
                 }
             }
@@ -44,7 +45,7 @@ class RoleMiddleware
         $roles = explode('|', $role);
 
         foreach ($roles as $r) {
-            if ($this->resolver->hasRole($userId, $r)) {
+            if ($this->resolver->hasRole($userId, $r, $guardName)) {
                 return $next($request);
             }
         }

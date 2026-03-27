@@ -26,9 +26,7 @@ class UnauthorizedException extends HttpException
      */
     public static function forPermissions(array $permissions): self
     {
-        $message = 'User does not have the required permissions [' . implode(', ', $permissions) . '].';
-
-        return new self(403, $message, $permissions);
+        return new self(403, 'User does not have the required permissions.', $permissions);
     }
 
     /**
@@ -36,9 +34,7 @@ class UnauthorizedException extends HttpException
      */
     public static function forRoles(array $roles): self
     {
-        $message = 'User does not have the required roles [' . implode(', ', $roles) . '].';
-
-        return new self(403, $message, $roles);
+        return new self(403, 'User does not have the required roles.', $roles);
     }
 
     /**
@@ -46,9 +42,7 @@ class UnauthorizedException extends HttpException
      */
     public static function forRolesOrPermissions(array $rolesOrPermissions): self
     {
-        $message = 'User does not have any of the required roles or permissions [' . implode(', ', $rolesOrPermissions) . '].';
-
-        return new self(403, $message, $rolesOrPermissions);
+        return new self(403, 'User does not have any of the required roles or permissions.', $rolesOrPermissions);
     }
 
     public static function notLoggedIn(): self
