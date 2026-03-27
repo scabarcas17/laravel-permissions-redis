@@ -206,7 +206,7 @@ auth:role:{roleId}:users         → SET of user IDs
 ### Requirements
 
 - PHP 8.3+
-- Laravel 11 or 12
+- Laravel 11, 12, or 13
 - Redis extension (`phpredis` or `predis`)
 
 ### Step 1 — Install via Composer
@@ -326,10 +326,13 @@ $admin  = Role::findOrCreate('admin');
 $editor = Role::findOrCreate('editor');
 
 // Assign permissions to a role
-$editor->permissions()->sync([
-    $createPosts->id,
-    $editPosts->id,
-]);
+$editor->syncPermissions(['posts.create', 'posts.edit']);
+
+// Or add permissions individually
+$editor->givePermissionTo('posts.create', 'posts.edit');
+
+// Remove permissions
+$editor->revokePermissionTo('posts.delete');
 ```
 
 ### Assigning Roles and Permissions
@@ -565,11 +568,15 @@ use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 
 $manager = app(AuthorizationCacheManager::class);
 
-$manager->warmAll();          // Full cache rebuild
-$manager->warmUser($userId);  // Warm specific user
-$manager->warmRole($roleId);  // Warm specific role
-$manager->evictUser($userId); // Remove user from cache
-$manager->evictRole($roleId); // Remove role from cache
+$manager->warmAll();            // Full cache rebuild (flush + warm)
+$manager->rewarmAll();          // Rewarm without flushing
+$manager->warmUser($userId);    // Warm specific user
+$manager->warmRole($roleId);    // Warm specific role
+$manager->evictUser($userId);   // Remove user from cache
+$manager->evictRole($roleId);   // Remove role from cache
+
+// Targeted warming after permission changes
+$manager->warmPermissionAffectedUsers($permissionId);
 ```
 
 #### Automatic Invalidation
@@ -638,6 +645,16 @@ $user->hasPermissionTo('api.access', 'api');
 $user->hasRole('api_consumer', 'api');
 ```
 
+#### Fluent Guard Scoping
+
+Use `forGuard()` to scope a single check without passing the guard to every method:
+
+```php
+$user->forGuard('api')->hasPermissionTo('api.access');
+$user->forGuard('api')->getAllPermissions();
+$user->forGuard('api')->getRoleNames();
+```
+
 ### Enum Support
 
 You can use `BackedEnum` for type-safe permission/role references:
@@ -679,9 +696,18 @@ $user->givePermissionTo(Permission::CreatePost, Permission::EditPost);
 | `hasRole` | `hasRole(mixed $roles, ?string $guardName = null)` | `bool` |
 | `hasAnyRole` | `hasAnyRole(mixed ...$roles)` | `bool` |
 | `hasAllRoles` | `hasAllRoles(mixed ...$roles)` | `bool` |
-| `getAllPermissions` | `getAllPermissions()` | `Collection<PermissionDTO>` |
-| `getPermissionNames` | `getPermissionNames()` | `Collection<string>` |
-| `getRoleNames` | `getRoleNames()` | `Collection<string>` |
+| `getAllPermissions` | `getAllPermissions(?string $guard = null)` | `Collection<PermissionDTO>` |
+| `getPermissionNames` | `getPermissionNames(?string $guard = null)` | `Collection<string>` |
+| `getRoleNames` | `getRoleNames(?string $guard = null)` | `Collection<string>` |
+| `forGuard` | `forGuard(string $guard)` | `static` |
+
+### `Role` Model Methods
+
+| Method | Signature | Returns |
+|---|---|---|
+| `syncPermissions` | `syncPermissions(array $permissions)` | `static` |
+| `givePermissionTo` | `givePermissionTo(mixed ...$permissions)` | `static` |
+| `revokePermissionTo` | `revokePermissionTo(mixed ...$permissions)` | `static` |
 
 ### Artisan Commands
 

@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-03-27
+
+### Added
+
+- **Guard-scoped resolution** — All permission and role checks (`hasPermission`, `hasRole`, `getAllPermissions`, `getAllRoles`) now accept an optional `?string $guard` parameter, enabling proper multi-guard support throughout the entire resolution pipeline.
+- **Guard-aware Redis storage** — Permissions and roles are stored in Redis as `guard|name` encoded entries, allowing the same permission name to exist under different guards without collision.
+- **`forGuard()` fluent method** — `$user->forGuard('api')->hasPermissionTo('posts.edit')` to scope a single check to a specific guard.
+- **`rewarmAll()` method** — Non-destructive cache rewarm on `AuthorizationCacheManager` that rebuilds without flushing first.
+- **`warmPermissionAffectedUsers()` method** — Targeted cache warming for all users affected by a specific permission change.
+- **`getUserIdsAffectedByPermission()` method** — Query all user IDs impacted by a permission (direct + role-inherited).
+- **Enum support for roles** — `BackedEnum` values are now fully supported in `assignRole`, `syncRoles`, `removeRole`, and all role-checking methods, matching the existing permission enum support.
+- **`PermissionDTO` as `readonly` class** — Immutable data transfer object using PHP 8.2+ `readonly` class syntax.
+- **Permission model `deleting` hook** — Automatically cleans up pivot table entries when a permission is deleted.
+- **Role model `syncPermissions()`, `givePermissionTo()`, `revokePermissionTo()`** — Fluent permission management methods directly on the Role model with automatic cache invalidation.
+- **Comprehensive test suite expansion** — Added `BladeDirectivesTest`, `RedisPermissionRepositoryTest`, `ModelsTest`, `ServiceProviderTest`, and significantly expanded `HasRedisPermissionsTest`, `CacheManagerWarmTest`, `CommandsTest`, and `PermissionResolverTest` (+1,500 lines of tests).
+- **Test enum fixtures** — `TestPermissionEnum` and `TestRoleEnum` for typed enum testing.
+
+### Changed
+
+- **Breaking: `PermissionResolverInterface`** — `hasPermission()`, `hasRole()`, `getAllPermissions()`, and `getAllRoles()` signatures now include an optional `$guard` parameter.
+- **Breaking: Redis key format** — Cached entries now use `guard|name` encoding instead of plain names. Existing caches must be flushed and rewarmed after upgrading.
+- **Blade directives refactored** — Extracted common authentication logic into `resolveForUser()` helper; all directives now pass the current guard to the resolver.
+- **Middleware guard-awareness** — `PermissionMiddleware`, `RoleMiddleware`, and `RoleOrPermissionMiddleware` now resolve the guard from the current authentication driver.
+- **Smarter `warmAllUsers()`** — No longer scans the entire users table; queries only users that have at least one role or direct permission assigned.
+- **`RedisPermissionRepository` caching** — Connection, prefix, and TTL are now lazily cached in instance properties to avoid repeated config lookups.
+- **`UnauthorizedException` improvements** — Cleaner construction with type-safe parameters.
+
+### Fixed
+
+- **Guard isolation** — Previously, permissions assigned under one guard (e.g., `api`) could bleed into checks under another guard (e.g., `web`). All checks are now guard-scoped.
+
 ## [1.1.0] - 2026-03-20
 
 ### Added
@@ -47,6 +78,7 @@ First stable release of `scabarcas/laravel-permissions-redis`.
 - **Comprehensive test suite** — Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
 - **Documentation** — README with installation guide, usage examples, conventions, API reference, and C4 architecture diagrams.
 
+[2.0.0]: https://github.com/scabarcas/laravel-permissions-redis/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/scabarcas/laravel-permissions-redis/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/scabarcas/laravel-permissions-redis/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/scabarcas/laravel-permissions-redis/releases/tag/v1.0.0
