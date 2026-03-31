@@ -1,5 +1,7 @@
 /vendor/
+/build/
 composer.lock
 .phpunit.cache/
 .phpstan-cache/
 .idea/
+infection.log

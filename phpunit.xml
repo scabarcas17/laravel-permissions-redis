@@ -9,6 +9,12 @@
             <directory>src</directory>
         </include>
     </source>
+    <coverage>
+        <report>
+            <clover outputFile="build/logs/clover.xml"/>
+            <html outputDirectory="build/coverage"/>
+        </report>
+    </coverage>
     <testsuites>
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
@@ -16,5 +22,5 @@
         <testsuite name="Integration">
             <directory>tests/Integration</directory>
         </testsuite>
-</testsuites>
+    </testsuites>
 </phpunit>

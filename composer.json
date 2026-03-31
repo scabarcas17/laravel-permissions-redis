@@ -19,7 +19,7 @@
         "orchestra/testbench": "^10.11|^11.0"
     },
     "license": "MIT",
-    "keywords": ["laravel", "permissions", "roles", "redis", "performance", "cache", "authorization"],
+    "keywords": ["laravel", "permissions", "roles", "redis", "authorization", "acl", "rbac", "access-control", "guard", "middleware", "cache", "performance"],
     "autoload": {
         "psr-4": {
             "Scabarcas\\LaravelPermissionsRedis\\": "src/"
@@ -41,8 +41,10 @@
     "prefer-stable": true,
     "scripts": {
         "test": "pest",
+        "test:coverage": "pest --coverage --min=80",
         "format": "pint",
-        "analyse": "phpstan analyse"
+        "analyse": "phpstan analyse",
+        "mutate": "infection --threads=4 --show-mutations"
     },
     "config": {
         "allow-plugins": {
