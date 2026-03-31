@@ -168,9 +168,9 @@ class PermissionsRedisServiceProvider extends ServiceProvider
     }
 
     /**
-     * @return Closure(): (string|int|null)
-     *
      * @throws BindingResolutionException
+     *
+     * @return Closure(): (string|int|null)
      */
     private function resolveTenantResolver(): Closure
     {
