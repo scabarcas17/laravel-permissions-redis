@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-03-31
+
+### Added
+
+- **Multi-tenancy support** — `TenantAwareRedisPermissionRepository` decorator that prefixes all cache keys with the current tenant ID, with built-in Stancl/Tenancy resolver and support for custom resolvers.
+- **UUID/ULID support** — Configurable `model_morph_key_type` option (`int`, `uuid`, `ulid`) for non-incrementing primary keys.
+- **Octane support** — Optional per-request state reset (`octane.reset_on_request`) that flushes in-memory caches between requests in long-lived workers.
+- **`permissions-redis:migrate-from-spatie` command** — Automated migration from `spatie/laravel-permission` with chunked inserts, schema compatibility checks, `--dry-run` mode, and post-migration cache warming.
+- **`permissions-redis:seed` command** — Declarative role/permission seeding from config with `--fresh` and `--no-warm` options and production safety confirmation.
+- **`WithPermissions` test trait** — Testing helper with `seedPermissions()`, `seedRoles()`, `actingAsWithPermissions()`, `actingAsWithRoles()`, and `flushPermissionCache()` for concise test setup.
+- **Documentation** — Migration guide from Spatie with method equivalence tables and behavior differences; integration guide for Policies, Sanctum/Passport, and Laravel Pulse.
+- **Community governance** — `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, GitHub issue templates, PR template, and funding configuration.
+- **CI improvements** — Redis service in GitHub Actions, test matrix for PHP 8.3/8.4 and Laravel 12/13, coverage reporting, and mutation testing with Infection.
+- **Test suite expansion** — Added `OctaneSupportTest`, `TenantAwareRepositoryTest`, and `UuidSupportTest`.
+
+### Fixed
+
+- **Octane reset resolving wrong class** — `registerOctaneReset()` now resolves `RedisPermissionRepository` directly instead of `PermissionRepositoryInterface`, which would fail when multi-tenancy was enabled. Also replaced `::class` reference with a string to avoid undefined class errors when Octane is not installed.
+
 ## [2.0.0] - 2026-03-27
 
 ### Added
@@ -78,6 +97,7 @@ First stable release of `scabarcas/laravel-permissions-redis`.
 - **Comprehensive test suite** — Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
 - **Documentation** — README with installation guide, usage examples, conventions, API reference, and C4 architecture diagrams.
 
+[3.0.0]: https://github.com/scabarcas/laravel-permissions-redis/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/scabarcas/laravel-permissions-redis/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/scabarcas/laravel-permissions-redis/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/scabarcas/laravel-permissions-redis/compare/v1.0.0...v1.0.1

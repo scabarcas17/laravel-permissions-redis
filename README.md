@@ -4,8 +4,13 @@ A high-performance, Redis-backed roles and permissions package for Laravel. Elim
 
 Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permission) — the de facto standard for roles and permissions in Laravel. This package adopts its familiar API (`hasRole`, `hasPermissionTo`, `assignRole`, Blade directives, middleware) while replacing the database-per-request approach with a Redis-first architecture for applications where authorization throughput is critical.
 
+[![CI](https://github.com/scabarcas17/laravel-permissions-redis/actions/workflows/ci.yml/badge.svg)](https://github.com/scabarcas17/laravel-permissions-redis/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/scabarcas17/laravel-permissions-redis/graph/badge.svg)](https://codecov.io/gh/scabarcas17/laravel-permissions-redis)
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/scabarcas/laravel-permissions-redis.svg)](https://packagist.org/packages/scabarcas/laravel-permissions-redis)
+[![Total Downloads](https://img.shields.io/packagist/dt/scabarcas/laravel-permissions-redis.svg)](https://packagist.org/packages/scabarcas/laravel-permissions-redis)
 [![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://php.net)
 [![Laravel 11|12|13](https://img.shields.io/badge/Laravel-11%20%7C%2012%20%7C%2013-red.svg)](https://laravel.com)
+[![PHPStan Level Max](https://img.shields.io/badge/PHPStan-level%20max-brightgreen.svg)](https://phpstan.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---
@@ -27,10 +32,19 @@ Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permis
   - [Wildcard Permissions](#wildcard-permissions)
   - [Super Admin](#super-admin)
   - [Cache Management](#cache-management)
+- [UUID / ULID Support](#uuid--ulid-support)
+- [Laravel Octane](#laravel-octane)
+- [Multi-Tenancy](#multi-tenancy)
+- [Integrations](#integrations)
 - [Conventions](#conventions)
 - [API Reference](#api-reference)
 - [Testing](#testing)
-- [Benchmark](#benchmark)
+- [Comparison with spatie/laravel-permission](#comparison-with-spatielaravel-permission)
+  - [Feature Comparison](#feature-comparison)
+  - [Performance Benchmark](#performance-benchmark)
+  - [When to Use This Package](#when-to-use-this-package)
+- [Migrating from Spatie](#migrating-from-spatie)
+- [Troubleshooting](#troubleshooting)
 - [License](#license)
 
 ---
@@ -281,6 +295,7 @@ All options live in `config/permissions-redis.php`:
 | `super_admin_role` | `PERMISSIONS_REDIS_SUPER_ADMIN_ROLE` | `null` | Role that bypasses all checks |
 | `wildcard_permissions` | `PERMISSIONS_REDIS_WILDCARD` | `false` | Enable `fnmatch()` wildcard patterns |
 | `register_blade_directives` | — | `true` | Register Blade directives |
+| `seed` | — | *(see config)* | Roles and permissions to seed via CLI |
 | `tables` | — | *(see config)* | Custom table names |
 
 ---
@@ -591,6 +606,205 @@ The cache is automatically invalidated when:
 | `UserDeleted` | Manually dispatched | Evict user cache |
 | `Login` | User logs in (if `warm_on_login` enabled) | Warm user cache |
 
+### Database Seeding
+
+Define your roles and permissions in `config/permissions-redis.php` and seed them with a single command:
+
+```php
+// config/permissions-redis.php
+'seed' => [
+    'roles' => [
+        'admin'  => ['users.*', 'posts.*', 'settings.update'],
+        'editor' => ['posts.create', 'posts.edit', 'posts.delete'],
+        'viewer' => ['posts.view', 'reports.view'],
+    ],
+    'permissions' => [
+        'reports.export',  // standalone permissions not tied to any role
+    ],
+],
+```
+
+```bash
+# Create permissions and roles (incremental — skips existing)
+php artisan permissions-redis:seed
+
+# Delete all and recreate from scratch
+php artisan permissions-redis:seed --fresh
+
+# Seed without warming Redis cache
+php artisan permissions-redis:seed --no-warm
+```
+
+The command creates all permissions referenced under roles automatically. Existing permissions and roles are left unchanged in incremental mode (default). The `--fresh` flag deletes all existing permissions, roles, and pivot assignments before seeding.
+
+---
+
+## UUID / ULID Support
+
+This package supports integer, UUID, and ULID primary keys for your User model. Set the column type in your configuration **before running migrations**:
+
+```php
+// config/permissions-redis.php
+'model_morph_key_type' => env('PERMISSIONS_REDIS_MORPH_KEY_TYPE', 'int'),
+```
+
+| Value | Column Type | Use Case |
+|-------|-------------|----------|
+| `'int'` | `unsignedBigInteger` | Default auto-increment IDs |
+| `'uuid'` | `uuid` | UUID primary keys (`HasUuids` trait) |
+| `'ulid'` | `ulid` | ULID primary keys (`HasUlids` trait) |
+
+All APIs (`hasPermissionTo`, `assignRole`, middleware, Blade directives, etc.) work transparently with any ID type. No code changes required beyond the config setting.
+
+```php
+// Works the same regardless of ID type
+$user->assignRole('admin');
+$user->hasPermissionTo('posts.create'); // true
+```
+
+> **Note:** If you have already run migrations with `'int'` and need to switch to UUID/ULID, you will need to create a new migration to alter the `model_id` columns in the pivot tables.
+
+---
+
+## Laravel Octane
+
+When running under [Laravel Octane](https://laravel.com/docs/octane), singletons persist across requests. This package provides built-in support to flush in-memory caches between requests, preventing stale permission data from leaking.
+
+### Setup
+
+```env
+PERMISSIONS_REDIS_OCTANE_RESET=true
+```
+
+Or in your config:
+
+```php
+// config/permissions-redis.php
+'octane' => [
+    'reset_on_request' => true,
+],
+```
+
+When enabled, the package listens to `RequestReceived` and automatically:
+1. Flushes the `PermissionResolver` in-memory caches (permission, role, super admin)
+2. Resets the `RedisPermissionRepository` cached connection, prefix, and TTL
+
+This ensures each Octane request starts with a clean state while still benefiting from Redis-level caching.
+
+---
+
+## Multi-Tenancy
+
+The package supports multi-tenant applications by prefixing Redis keys with a tenant identifier, ensuring complete isolation of permission data between tenants.
+
+### Setup
+
+```env
+PERMISSIONS_REDIS_TENANCY_ENABLED=true
+PERMISSIONS_REDIS_TENANCY_RESOLVER=stancl
+```
+
+Or in your config:
+
+```php
+// config/permissions-redis.php
+'tenancy' => [
+    'enabled'  => true,
+    'resolver' => 'stancl', // or a custom class
+],
+```
+
+### Built-in Resolvers
+
+| Resolver | Description |
+|----------|-------------|
+| `'stancl'` | Auto-detects tenant via [stancl/tenancy](https://tenancyforlaravel.com/) |
+| `App\Tenancy\MyResolver::class` | Custom callable class returning `string\|int\|null` |
+| `null` | Disabled (default) |
+
+### Custom Resolver
+
+Create a class that returns the current tenant identifier:
+
+```php
+namespace App\Tenancy;
+
+class TenantResolver
+{
+    public function __invoke(): string|int|null
+    {
+        return session('tenant_id');
+    }
+}
+```
+
+```php
+'tenancy' => [
+    'enabled'  => true,
+    'resolver' => \App\Tenancy\TenantResolver::class,
+],
+```
+
+### How It Works
+
+When tenancy is enabled, user-related Redis keys are prefixed with the tenant ID:
+
+```
+# Without tenancy
+auth:user:1:permissions
+
+# With tenancy (tenant "acme")
+auth:user:t:acme:1:permissions
+```
+
+Role-related keys (`auth:role:*`) are shared across tenants since they reference global database records. If you need per-tenant roles, use separate database tables per tenant.
+
+---
+
+## Integrations
+
+This package works well with Laravel Policies, Sanctum/Passport, and Pulse. See the **[full integrations guide](docs/integrations.md)** for detailed examples.
+
+### Laravel Policies
+
+Policies work automatically with this package. The Gate `before` callback checks Redis first — if the user has the permission, it's granted immediately. If not, the Policy method decides:
+
+```php
+// In a controller — checks Redis first, then PostPolicy::update()
+$this->authorize('posts.edit', $post);
+
+// In Blade — same behavior
+@can('posts.edit', $post)
+    <button>Edit</button>
+@endcan
+```
+
+```php
+class PostPolicy
+{
+    // Only called if user does NOT have 'posts.edit' in Redis
+    public function update(User $user, Post $post): bool
+    {
+        return $post->user_id === $user->id; // fallback: owners can edit
+    }
+}
+```
+
+### Laravel Sanctum / Passport
+
+Combine token abilities with Redis permissions for API routes:
+
+```php
+Route::middleware(['auth:sanctum', 'permission:posts.create'])
+    ->post('/posts', [PostController::class, 'store']);
+```
+
+For dual enforcement (token ability + user permission), see the [custom middleware example](docs/integrations.md#custom-middleware-for-dual-checks) in the integrations guide.
+
+### Laravel Pulse
+
+Track permission check performance with a custom Pulse recorder. The [integrations guide](docs/integrations.md#laravel-pulse) includes a complete setup with recorder, decorator, and dashboard card — no Pulse dependency required in this package.
+
 ---
 
 ## Conventions
@@ -680,34 +894,187 @@ $user->givePermissionTo(Permission::CreatePost, Permission::EditPost);
 
 ## API Reference
 
-### `HasRedisPermissions` Trait Methods
+### `HasRedisPermissions` Trait — Check Methods
 
-| Method | Signature | Returns |
-|---|---|---|
-| `assignRole` | `assignRole(mixed ...$roles)` | `static` |
-| `syncRoles` | `syncRoles(mixed ...$roles)` | `static` |
-| `removeRole` | `removeRole(mixed $role)` | `static` |
-| `givePermissionTo` | `givePermissionTo(mixed ...$permissions)` | `static` |
-| `revokePermissionTo` | `revokePermissionTo(mixed ...$permissions)` | `static` |
-| `syncPermissions` | `syncPermissions(array $permissions)` | `static` |
-| `hasPermissionTo` | `hasPermissionTo(string\|BackedEnum $permission, ?string $guardName = null)` | `bool` |
-| `hasAnyPermission` | `hasAnyPermission(mixed ...$permissions)` | `bool` |
-| `hasAllPermissions` | `hasAllPermissions(mixed ...$permissions)` | `bool` |
-| `hasRole` | `hasRole(mixed $roles, ?string $guardName = null)` | `bool` |
-| `hasAnyRole` | `hasAnyRole(mixed ...$roles)` | `bool` |
-| `hasAllRoles` | `hasAllRoles(mixed ...$roles)` | `bool` |
-| `getAllPermissions` | `getAllPermissions(?string $guard = null)` | `Collection<PermissionDTO>` |
-| `getPermissionNames` | `getPermissionNames(?string $guard = null)` | `Collection<string>` |
-| `getRoleNames` | `getRoleNames(?string $guard = null)` | `Collection<string>` |
-| `forGuard` | `forGuard(string $guard)` | `static` |
+| Method | Signature | Returns | Description |
+|---|---|---|---|
+| `hasPermissionTo` | `hasPermissionTo(string\|BackedEnum $permission, ?string $guardName = null)` | `bool` | Check if user has a specific permission |
+| `hasAnyPermission` | `hasAnyPermission(mixed ...$permissions)` | `bool` | Check if user has **any** of the given permissions |
+| `hasAllPermissions` | `hasAllPermissions(mixed ...$permissions)` | `bool` | Check if user has **all** of the given permissions |
+| `hasRole` | `hasRole(mixed $roles, ?string $guardName = null)` | `bool` | Check if user has a role (accepts string, int, BackedEnum, array, Collection) |
+| `hasAnyRole` | `hasAnyRole(mixed ...$roles)` | `bool` | Check if user has **any** of the given roles |
+| `hasAllRoles` | `hasAllRoles(mixed ...$roles)` | `bool` | Check if user has **all** of the given roles |
+
+```php
+$user->hasPermissionTo('posts.edit');                       // true
+$user->hasPermissionTo(Permission::EditPost);               // true (BackedEnum)
+$user->hasAnyPermission('posts.edit', 'posts.delete');      // true (has at least one)
+$user->hasAllPermissions('posts.edit', 'posts.delete');     // false (missing one)
+$user->hasRole('admin');                                    // true
+$user->hasRole(['admin', 'editor']);                         // true (has at least one)
+$user->hasAnyRole('admin', 'editor');                       // true
+$user->hasAllRoles('admin', 'editor');                      // false (missing one)
+```
+
+### `HasRedisPermissions` Trait — Retrieval Methods
+
+| Method | Signature | Returns | Description |
+|---|---|---|---|
+| `getAllPermissions` | `getAllPermissions(?string $guard = null)` | `Collection<PermissionDTO>` | All permissions (direct + role-inherited) as DTOs |
+| `getPermissionNames` | `getPermissionNames(?string $guard = null)` | `Collection<string>` | Permission names only |
+| `getRoleNames` | `getRoleNames(?string $guard = null)` | `Collection<string>` | Role names |
+| `forGuard` | `forGuard(string $guard)` | `static` | Fluent guard scope (auto-resets after one call) |
+
+```php
+$user->getAllPermissions();
+// Collection [PermissionDTO { name: 'posts.edit', id: 1, group: 'content', guard: 'web' }, ...]
+
+$user->getPermissionNames();            // Collection ['posts.edit', 'posts.create']
+$user->getRoleNames();                  // Collection ['admin', 'editor']
+
+$user->forGuard('api')->getRoleNames(); // Collection ['api_consumer']
+```
+
+### `HasRedisPermissions` Trait — Assignment Methods
+
+| Method | Signature | Returns | Description | Event |
+|---|---|---|---|---|
+| `assignRole` | `assignRole(mixed ...$roles)` | `static` | Add roles (does not remove existing) | `RolesAssigned` |
+| `syncRoles` | `syncRoles(mixed ...$roles)` | `static` | Replace all roles | `RolesAssigned` |
+| `removeRole` | `removeRole(mixed $role)` | `static` | Remove a specific role | `RolesAssigned` |
+| `givePermissionTo` | `givePermissionTo(mixed ...$permissions)` | `static` | Add direct permissions | — |
+| `revokePermissionTo` | `revokePermissionTo(mixed ...$permissions)` | `static` | Remove direct permissions | — |
+| `syncPermissions` | `syncPermissions(array $permissions)` | `static` | Replace all direct permissions | — |
+
+All assignment methods accept: `string`, `int` (ID), `BackedEnum`, `array`, or `Collection`.
+
+```php
+$user->assignRole('admin', 'editor');           // additive
+$user->syncRoles('editor');                     // replaces all — user now has only 'editor'
+$user->removeRole('editor');                    // removes 'editor'
+
+$user->givePermissionTo('reports.export');      // direct permission
+$user->revokePermissionTo('reports.export');    // revoke
+$user->syncPermissions(['reports.view']);        // replace all direct permissions
+```
+
+### `HasRedisPermissions` Trait — Relationships & Scopes
+
+| Method | Signature | Returns | Description |
+|---|---|---|---|
+| `roles` | `roles()` | `BelongsToMany<Role>` | Eloquent relationship to roles |
+| `permissions` | `permissions()` | `BelongsToMany<Permission>` | Eloquent relationship to direct permissions |
+| `scopeRole` | `scopeRole($query, mixed $roles, ?string $guard = null)` | `Builder` | Filter users by role |
+| `scopePermission` | `scopePermission($query, mixed $permissions, ?string $guard = null)` | `Builder` | Filter users by permission (direct or via role) |
+
+```php
+User::role('admin')->get();             // all admins
+User::role(['admin', 'editor'])->get(); // users with admin OR editor
+User::permission('posts.edit')->get();  // users who can edit posts (direct or via role)
+```
 
 ### `Role` Model Methods
 
+| Method | Signature | Returns | Event |
+|---|---|---|---|
+| `Role::findOrCreate` | `findOrCreate(string $name, string $guardName = 'web')` | `Role` | — |
+| `syncPermissions` | `syncPermissions(array $permissions)` | `static` | `PermissionsSynced` |
+| `givePermissionTo` | `givePermissionTo(mixed ...$permissions)` | `static` | `PermissionsSynced` |
+| `revokePermissionTo` | `revokePermissionTo(mixed ...$permissions)` | `static` | `PermissionsSynced` |
+| `permissions` | `permissions()` | `BelongsToMany<Permission>` | — |
+| `users` | `users()` | `BelongsToMany<User>` | — |
+
+```php
+$role = Role::findOrCreate('editor');
+$role->syncPermissions(['posts.create', 'posts.edit']);  // replace
+$role->givePermissionTo('posts.publish');                // additive
+$role->revokePermissionTo('posts.publish');              // remove
+```
+
+> Deleting a role dispatches `RoleDeleted` and automatically rewarms affected users' caches.
+
+### `Permission` Model Methods
+
 | Method | Signature | Returns |
 |---|---|---|
-| `syncPermissions` | `syncPermissions(array $permissions)` | `static` |
-| `givePermissionTo` | `givePermissionTo(mixed ...$permissions)` | `static` |
-| `revokePermissionTo` | `revokePermissionTo(mixed ...$permissions)` | `static` |
+| `Permission::findOrCreate` | `findOrCreate(string $name, string $guardName = 'web', ?string $group = null)` | `Permission` |
+
+```php
+$perm = Permission::findOrCreate('posts.create');                      // default guard 'web'
+$perm = Permission::findOrCreate('api.access', 'api');                 // custom guard
+$perm = Permission::findOrCreate('posts.edit', 'web', 'content');      // with group
+```
+
+> Updating or deleting a permission automatically rewarms all affected users' caches.
+
+### `AuthorizationCacheManager`
+
+| Method | Signature | Returns | Description |
+|---|---|---|---|
+| `warmAll` | `warmAll()` | `void` | Flush Redis + reload all users and roles from DB |
+| `rewarmAll` | `rewarmAll()` | `void` | Reload without flushing (incremental) |
+| `warmUser` | `warmUser(int\|string $userId)` | `void` | Warm a specific user's cache |
+| `warmRole` | `warmRole(int $roleId)` | `void` | Warm a specific role's cache |
+| `evictUser` | `evictUser(int\|string $userId)` | `void` | Remove a user from Redis cache |
+| `evictRole` | `evictRole(int $roleId)` | `void` | Remove a role from Redis cache |
+| `warmPermissionAffectedUsers` | `warmPermissionAffectedUsers(int $permissionId)` | `void` | Rewarm all users affected by a permission change |
+
+```php
+$manager = app(AuthorizationCacheManager::class);
+
+$manager->warmAll();                                // full rebuild
+$manager->warmUser($user->id);                      // single user
+$manager->evictUser($user->id);                     // remove from cache
+$manager->warmPermissionAffectedUsers($perm->id);   // rewarm after manual DB change
+```
+
+### Exceptions
+
+| Exception | HTTP Status | Thrown By | Description |
+|---|---|---|---|
+| `UnauthorizedException::forPermissions($perms)` | 403 | `PermissionMiddleware` | User lacks required permissions |
+| `UnauthorizedException::forRoles($roles)` | 403 | `RoleMiddleware` | User lacks required roles |
+| `UnauthorizedException::forRolesOrPermissions($items)` | 403 | `RoleOrPermissionMiddleware` | User lacks both roles and permissions |
+| `UnauthorizedException::notLoggedIn()` | 401 | All middleware | User is not authenticated |
+
+All exceptions extend `Symfony\Component\HttpKernel\Exception\HttpException`. Use `getRequiredItems()` to retrieve the missing roles/permissions:
+
+```php
+try {
+    // middleware check
+} catch (UnauthorizedException $e) {
+    $e->getStatusCode();     // 403
+    $e->getMessage();        // 'User does not have the required permissions.'
+    $e->getRequiredItems();  // ['posts.edit', 'posts.delete']
+}
+```
+
+### Events
+
+| Event | Payload | Dispatched When | Cache Action |
+|---|---|---|---|
+| `RolesAssigned` | `Model $user` | `assignRole()`, `syncRoles()`, `removeRole()` | Rewarms user cache + reindexes role→users |
+| `PermissionsSynced` | `Model $role` | `$role->syncPermissions()`, `givePermissionTo()`, `revokePermissionTo()` | Rewarms role + all users with that role |
+| `RoleDeleted` | `int $roleId` | `Role::delete()` | Evicts role cache + rewarms affected users |
+| `UserDeleted` | `int\|string $userId` | Manually dispatched | Evicts user cache from Redis |
+
+All events are in the `Scabarcas\LaravelPermissionsRedis\Events` namespace and use the `Dispatchable` trait.
+
+```php
+// Listen to events in your app
+use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
+
+Event::listen(RolesAssigned::class, function (RolesAssigned $event) {
+    Log::info("Roles changed for user {$event->user->id}");
+});
+
+// Manually dispatch UserDeleted when deleting users
+use Scabarcas\LaravelPermissionsRedis\Events\UserDeleted;
+
+User::deleted(function (User $user) {
+    event(new UserDeleted($user->id));
+});
+```
 
 ### Artisan Commands
 
@@ -715,8 +1082,23 @@ $user->givePermissionTo(Permission::CreatePost, Permission::EditPost);
 |---|---|
 | `permissions-redis:warm` | Warm the full authorization cache |
 | `permissions-redis:warm-user {userId}` | Warm cache for a specific user |
-| `permissions-redis:flush` | Flush all authorization cache |
-| `permissions-redis:stats` | Display cache statistics |
+| `permissions-redis:flush` | Flush all authorization cache (requires confirmation) |
+| `permissions-redis:stats` | Display cache statistics (cached users, roles, keys, TTL) |
+| `permissions-redis:seed` | Seed permissions and roles from config |
+| `permissions-redis:migrate-from-spatie` | Migrate data from spatie/laravel-permission |
+
+```bash
+php artisan permissions-redis:warm                           # full cache rebuild
+php artisan permissions-redis:warm --no-flush                # incremental rewarm
+php artisan permissions-redis:warm-user 42                   # single user
+php artisan permissions-redis:warm-user 550e8400-e29b        # UUID user
+php artisan permissions-redis:flush                          # flush all (asks confirmation)
+php artisan permissions-redis:stats                          # show stats table
+php artisan permissions-redis:seed                           # seed from config (incremental)
+php artisan permissions-redis:seed --fresh                   # delete all + reseed
+php artisan permissions-redis:migrate-from-spatie            # migrate from Spatie
+php artisan permissions-redis:migrate-from-spatie --dry-run  # preview only
+```
 
 ---
 
@@ -737,7 +1119,68 @@ composer format
 
 ### Testing in Your Application
 
-Bind the in-memory repository in your test suite to avoid Redis dependency:
+#### WithPermissions Trait
+
+The package provides a `WithPermissions` trait with helpers for feature tests:
+
+```php
+use Scabarcas\LaravelPermissionsRedis\Testing\WithPermissions;
+
+class PostControllerTest extends TestCase
+{
+    use WithPermissions;
+
+    public function test_admin_can_create_posts(): void
+    {
+        $user = User::factory()->create();
+
+        // Seeds permissions + assigns them + acts as the user
+        $this->actingAsWithPermissions($user, ['posts.create', 'posts.edit'])
+            ->post('/posts', ['title' => 'Hello'])
+            ->assertStatus(201);
+    }
+
+    public function test_editor_role_can_edit(): void
+    {
+        $user = User::factory()->create();
+
+        // Seeds role + assigns it + acts as the user
+        $this->actingAsWithRoles($user, ['editor'])
+            ->put('/posts/1', ['title' => 'Updated'])
+            ->assertOk();
+    }
+}
+```
+
+**Available methods:**
+
+| Method | Description |
+|--------|-------------|
+| `seedPermissions(['posts.create', ...])` | Create permission records in the database |
+| `seedRoles(['admin' => ['posts.*'], ...])` | Create roles with permission assignments |
+| `actingAsWithPermissions($user, [...])` | Seed + assign permissions + `actingAs()` |
+| `actingAsWithRoles($user, [...])` | Seed + assign roles + `actingAs()` |
+| `flushPermissionCache()` | Flush both Redis and in-memory caches |
+
+#### Pest Example
+
+```php
+use Scabarcas\LaravelPermissionsRedis\Testing\WithPermissions;
+
+uses(WithPermissions::class);
+
+it('allows admins to manage users', function () {
+    $user = User::factory()->create();
+
+    $this->actingAsWithRoles($user, ['admin'])
+        ->get('/admin/users')
+        ->assertOk();
+});
+```
+
+#### InMemoryPermissionRepository
+
+Alternatively, bind the in-memory repository in your test suite to avoid Redis entirely:
 
 ```php
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
@@ -752,11 +1195,59 @@ $this->app->singleton(
 
 ---
 
-## Benchmark
+## Comparison with spatie/laravel-permission
 
-We provide a [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) that compares query performance between `spatie/laravel-permission` and this package side by side.
+### Feature Comparison
 
-### Quick Results
+| Feature | spatie/laravel-permission | laravel-permissions-redis |
+|---------|:------------------------:|:-------------------------:|
+| **Core** | | |
+| Assign roles to users | :white_check_mark: | :white_check_mark: |
+| Assign permissions to roles | :white_check_mark: | :white_check_mark: |
+| Assign direct permissions to users | :white_check_mark: | :white_check_mark: |
+| Multiple guard support | :white_check_mark: | :white_check_mark: |
+| Fluent guard scoping (`forGuard()`) | :x: | :white_check_mark: |
+| `BackedEnum` support for roles/permissions | :white_check_mark: | :white_check_mark: |
+| UUID / ULID primary keys | :white_check_mark: | :white_check_mark: |
+| **Querying** | | |
+| `hasRole` / `hasAnyRole` / `hasAllRoles` | :white_check_mark: | :white_check_mark: |
+| `hasPermissionTo` / `hasAnyPermission` / `hasAllPermissions` | :white_check_mark: | :white_check_mark: |
+| `getDirectPermissions()` | :white_check_mark: | :x: |
+| `getPermissionsViaRoles()` | :white_check_mark: | :x: |
+| Query scopes (`scopeRole`, `scopePermission`) | :white_check_mark: | :white_check_mark: |
+| **Cache** | | |
+| Cache backend | Laravel Cache (any driver) | Redis directly (SET structures) |
+| Permission check complexity | O(n) array scan | O(1) `SISMEMBER` |
+| In-memory request cache | :x: | :white_check_mark: |
+| Automatic cache invalidation | Forget all on change | Surgical warm per user/role |
+| Cache warm on login | :x: | :white_check_mark: |
+| Cache warm CLI | :x: | :white_check_mark: (`permissions-redis:warm`) |
+| Cache statistics CLI | :x: | :white_check_mark: (`permissions-redis:stats`) |
+| **Middleware & Blade** | | |
+| `permission` / `role` / `role_or_permission` middleware | :white_check_mark: | :white_check_mark: |
+| AND (`&`) / OR (`\|`) operators in middleware | :white_check_mark: | :white_check_mark: |
+| `@role` / `@hasanyrole` / `@hasallroles` | :white_check_mark: | :white_check_mark: |
+| `@permission` / `@hasanypermission` / `@hasallpermissions` | :x: | :white_check_mark: |
+| `@unlessrole` | :white_check_mark: | :x: (use `@role ... @else`) |
+| Gate integration (`@can`, `authorize()`) | :white_check_mark: | :white_check_mark: |
+| **Advanced** | | |
+| Wildcard permissions (`fnmatch`) | Partial | :white_check_mark: |
+| Super admin role (bypass all checks) | :x: | :white_check_mark: |
+| Laravel Octane support | :x: | :white_check_mark: |
+| Multi-tenancy (Redis key isolation) | Teams feature | :white_check_mark: |
+| Permission groups | :x: | :white_check_mark: |
+| Testing helpers trait | :x: | :white_check_mark: (`WithPermissions`) |
+| Migration from Spatie CLI | — | :white_check_mark: |
+| **Requirements** | | |
+| PHP | 8.0+ | 8.3+ |
+| Laravel | 8 – 13 | 11 – 13 |
+| Redis | Optional | Required |
+
+### Performance Benchmark
+
+We provide a [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) that compares both packages side by side under identical conditions.
+
+#### Database queries per request
 
 | Scenario | spatie/laravel-permission | laravel-permissions-redis | Reduction |
 |----------|:------------------------:|:-------------------------:|:---------:|
@@ -766,7 +1257,25 @@ We provide a [standalone benchmark application](https://github.com/scabarcas17/l
 
 > After the initial cache warm, all permission and role checks are resolved entirely from Redis with **zero additional database queries**.
 
-### Try it yourself
+#### How the caching differs
+
+| Aspect | spatie/laravel-permission | laravel-permissions-redis |
+|--------|---------------------------|---------------------------|
+| **Cold start** | Queries DB, caches full permission array via Cache facade | Queries DB, warms Redis SETs per user/role |
+| **Warm check** | Deserialize cached array → scan for match | `SISMEMBER` (O(1) hash lookup in Redis) |
+| **In-memory** | None — hits cache driver every call | Per-request memory cache avoids repeated Redis calls |
+| **Invalidation** | `forgetCachedPermissions()` — drops entire cache | Surgical: only rewarms affected user/role |
+| **After invalidation** | Next request pays full DB reload cost | Cache is already warm — zero penalty |
+| **Concurrent users** | Each request may independently rebuild cache | Redis SETs are shared across all processes |
+
+#### When the difference matters most
+
+- **High-traffic APIs** — Hundreds of permission checks per second. The O(1) Redis lookup vs O(n) array scan adds up.
+- **Role/permission changes** — Spatie drops the entire cache; next N requests all hit the DB simultaneously. This package rewarms only the affected user(s).
+- **Octane / long-running workers** — Spatie's cache can go stale in persistent workers. This package flushes in-memory state between Octane requests automatically.
+- **Multi-tenant apps** — Isolated Redis key namespaces prevent tenants from leaking data.
+
+#### Try it yourself
 
 ```bash
 git clone https://github.com/scabarcas17/laravel-permissions-redis-benchmark.git
@@ -776,6 +1285,224 @@ docker compose up -d
 ```
 
 See the [benchmark repository](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) for full details, screenshots, and instructions.
+
+### When to Use This Package
+
+#### Use `laravel-permissions-redis` when:
+
+- **Performance is critical** — Your app handles high traffic and permission checks are a bottleneck. Redis `SISMEMBER` is orders of magnitude faster than deserializing cached arrays.
+- **You already run Redis** — If Redis is part of your stack (sessions, queues, cache), adding authorization to it is a natural fit with no additional infrastructure.
+- **You use Laravel Octane** — Built-in support for flushing in-memory state between requests prevents stale permission data in long-lived workers.
+- **You need multi-tenancy** — Redis key isolation per tenant is built in, with support for `stancl/tenancy` or custom resolvers.
+- **You want always-warm cache** — Instead of "forget and reload", this package keeps the cache hot with surgical invalidation.
+- **You want wildcard permissions** — `fnmatch()` patterns like `posts.*` are fully supported.
+- **You want a super admin role** — One config option to bypass all permission checks for a designated role.
+
+#### Stick with `spatie/laravel-permission` when:
+
+- **You don't run Redis** — This package requires Redis. If your infrastructure doesn't include it and you don't want to add it, Spatie works with any Laravel cache driver.
+- **You need `getDirectPermissions()` / `getPermissionsViaRoles()`** — If your business logic distinguishes between direct and role-inherited permissions at runtime, Spatie provides this natively. This package merges them.
+- **You need the teams feature** — Spatie's teams support is more mature than this package's multi-tenancy for certain team-based authorization patterns.
+- **You support older PHP/Laravel versions** — Spatie supports PHP 8.0+ and Laravel 8+. This package requires PHP 8.3+ and Laravel 11+.
+- **Authorization is not a bottleneck** — If your app has low traffic and few permission checks per request, the database-backed approach is perfectly adequate.
+
+---
+
+## Migrating from Spatie
+
+Coming from `spatie/laravel-permission`? The API is intentionally similar — most changes are namespace swaps and config adjustments.
+
+See the **[full migration guide](docs/migration-from-spatie.md)** for:
+
+- Step-by-step migration instructions
+- Method equivalence table (Spatie → this package)
+- Behavior differences to be aware of
+- Config mapping between both packages
+- Artisan command to copy data and warm cache: `permissions-redis:migrate-from-spatie`
+
+```bash
+# Quick start — run after installing this package alongside Spatie
+php artisan permissions-redis:migrate-from-spatie
+```
+
+---
+
+## Troubleshooting
+
+### Redis connection refused
+
+**Symptom:** `ConnectionException: Connection refused` or `Redis server went away`.
+
+**Fix:**
+
+1. Verify Redis is running:
+   ```bash
+   redis-cli ping
+   # Expected: PONG
+   ```
+
+2. Check your `.env` Redis settings:
+   ```env
+   REDIS_HOST=127.0.0.1
+   REDIS_PORT=6379
+   REDIS_PASSWORD=null
+   ```
+
+3. Verify the connection name in `config/permissions-redis.php` matches a connection defined in `config/database.php`:
+   ```php
+   // config/permissions-redis.php
+   'redis_connection' => env('PERMISSIONS_REDIS_CONNECTION', 'default'),
+   ```
+
+4. If using Docker, ensure the Redis service is accessible from your app container (use the service name, not `127.0.0.1`).
+
+### Cache not invalidating after changes
+
+**Symptom:** `assignRole()` or `givePermissionTo()` succeeds but `hasRole()` / `hasPermissionTo()` still returns the old value.
+
+**Fix:**
+
+1. Verify the event subscriber is registered. The `CacheInvalidator` subscriber should be active:
+   ```bash
+   php artisan permissions-redis:stats
+   # If this runs, the service provider is loaded
+   ```
+
+2. Check that you are not suppressing events. `Model::withoutEvents()` or `Event::fake()` will prevent cache invalidation:
+   ```php
+   // This will NOT invalidate cache:
+   Model::withoutEvents(fn () => $user->roles()->attach($roleId));
+
+   // This WILL invalidate cache (use the trait method):
+   $user->assignRole('admin');
+   ```
+
+3. If you modify pivot tables directly via `DB::table()`, the cache won't auto-update. Warm manually:
+   ```bash
+   php artisan permissions-redis:warm-user {userId}
+   ```
+
+4. For Octane users, ensure `reset_on_request` is enabled so in-memory caches don't persist across requests:
+   ```env
+   PERMISSIONS_REDIS_OCTANE_RESET=true
+   ```
+
+### Permissions not detected after assignment
+
+**Symptom:** `$user->hasPermissionTo('posts.edit')` returns `false` even though the permission was just assigned.
+
+**Fix:**
+
+1. **Guard mismatch** — This is the most common cause. Permissions and roles are scoped by guard name. If a permission was created with guard `web` but you're checking from an `api` guard context, it won't match:
+   ```php
+   // Created with 'web' guard (default)
+   Permission::findOrCreate('posts.edit');
+
+   // Checking from 'api' guard — won't find it!
+   $user->hasPermissionTo('posts.edit', 'api'); // false
+
+   // Fix: create the permission for the correct guard
+   Permission::findOrCreate('posts.edit', 'api');
+
+   // Or use forGuard() to check explicitly
+   $user->forGuard('web')->hasPermissionTo('posts.edit'); // true
+   ```
+
+2. **Permission not assigned to role** — If the user has a role but the role doesn't have the permission:
+   ```php
+   $role = Role::findOrCreate('editor');
+   $role->syncPermissions(['posts.create']); // 'posts.edit' is not here
+   $user->assignRole('editor');
+   $user->hasPermissionTo('posts.edit'); // false — not in role
+   ```
+
+3. **Cache is stale** — Force a cache refresh:
+   ```bash
+   php artisan permissions-redis:warm-user {userId}
+   ```
+
+### Performance degradation
+
+**Symptom:** Permission checks are slower than expected.
+
+**Diagnose:**
+
+1. Check cache statistics:
+   ```bash
+   php artisan permissions-redis:stats
+   ```
+   - **0 cached users** = cache is cold. Run `php artisan permissions-redis:warm`.
+   - **TTL too low** = cache expires too often. Increase `PERMISSIONS_REDIS_TTL`.
+
+2. Check Redis latency:
+   ```bash
+   redis-cli --latency
+   ```
+   Latency above 1ms may indicate network issues between app and Redis.
+
+3. If using `predis` (userland PHP client), consider switching to `phpredis` (C extension) for better performance:
+   ```bash
+   pecl install redis
+   ```
+   Then set `'client' => 'phpredis'` in `config/database.php`.
+
+4. If wildcard permissions are enabled and you have many permissions per user, `fnmatch()` scans all permissions. Consider using explicit permissions instead of wildcards for hot paths.
+
+### Conflict with spatie/laravel-permission
+
+**Symptom:** Unexpected behavior when both packages are installed, or errors after removing Spatie.
+
+**Fix:**
+
+1. **Both installed (during migration):** Both packages register the same middleware aliases (`permission`, `role`, `role_or_permission`). Whichever service provider loads last wins. This is expected during migration. Follow the [migration guide](docs/migration-from-spatie.md).
+
+2. **After removing Spatie:**
+   ```bash
+   composer remove spatie/laravel-permission
+   php artisan config:clear
+   php artisan cache:clear
+   php artisan route:clear
+   ```
+
+3. Remove Spatie's config if it still exists:
+   ```bash
+   rm config/permission.php
+   ```
+
+4. Search for leftover Spatie references:
+   ```bash
+   grep -r "Spatie\\\\Permission" app/ config/ routes/ --include="*.php"
+   ```
+
+### Migrations not publishing
+
+**Symptom:** `vendor:publish` doesn't create migration files or config.
+
+**Fix:**
+
+1. Verify the package is installed:
+   ```bash
+   composer show scabarcas/laravel-permissions-redis
+   ```
+
+2. Verify service provider auto-discovery is working:
+   ```bash
+   php artisan package:discover
+   ```
+
+3. Publish by tag explicitly:
+   ```bash
+   php artisan vendor:publish --tag=permissions-redis-config
+   php artisan vendor:publish --tag=permissions-redis-migrations
+   ```
+
+4. If using `dont-discover` in `composer.json`, register the service provider manually in `bootstrap/providers.php`:
+   ```php
+   return [
+       // ...
+       Scabarcas\LaravelPermissionsRedis\PermissionsRedisServiceProvider::class,
+   ];
+   ```
 
 ---
 
