@@ -26,7 +26,7 @@ class RoleOrPermissionMiddleware
             throw UnauthorizedException::notLoggedIn();
         }
 
-        /** @var int $userId */
+        /** @var int|string $userId */
         $userId = $user->getAuthIdentifier();
         $guardName = $guard ?? auth()->getDefaultDriver();
 

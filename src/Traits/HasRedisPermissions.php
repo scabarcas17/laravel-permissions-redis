@@ -17,7 +17,7 @@ use Scabarcas\LaravelPermissionsRedis\Models\Role;
 /**
  * @mixin Model
  *
- * @property int $id
+ * @property int|string $id
  */
 trait HasRedisPermissions
 {

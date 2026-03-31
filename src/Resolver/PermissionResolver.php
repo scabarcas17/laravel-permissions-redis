@@ -15,19 +15,19 @@ class PermissionResolver implements PermissionResolverInterface
 {
     use LogsMessages;
 
-    /** @var array<int, array<string, bool>> */
+    /** @var array<int|string, array<string, bool>> */
     private array $permissionCache = [];
 
-    /** @var array<int, array<string, bool>> */
+    /** @var array<int|string, array<string, bool>> */
     private array $roleCache = [];
 
-    /** @var array<int, array<string>|null> */
+    /** @var array<int|string, array<string>|null> */
     private array $allPermissionsCache = [];
 
-    /** @var array<int, array<string>|null> */
+    /** @var array<int|string, array<string>|null> */
     private array $allRolesCache = [];
 
-    /** @var array<int, bool> */
+    /** @var array<int|string, bool> */
     private array $superAdminCache = [];
 
     public function __construct(
@@ -36,7 +36,7 @@ class PermissionResolver implements PermissionResolverInterface
     ) {
     }
 
-    public function hasPermission(int $userId, string $permission, ?string $guard = null): bool
+    public function hasPermission(int|string $userId, string $permission, ?string $guard = null): bool
     {
         $guard = $this->resolveGuard($guard);
         $cacheKey = "{$guard}|{$permission}";
@@ -62,7 +62,7 @@ class PermissionResolver implements PermissionResolverInterface
         return $result;
     }
 
-    public function hasRole(int $userId, string $role, ?string $guard = null): bool
+    public function hasRole(int|string $userId, string $role, ?string $guard = null): bool
     {
         $guard = $this->resolveGuard($guard);
         $cacheKey = "{$guard}|{$role}";
@@ -81,7 +81,7 @@ class PermissionResolver implements PermissionResolverInterface
     }
 
     /** @return Collection<int, PermissionDTO> */
-    public function getAllPermissions(int $userId, ?string $guard = null): Collection
+    public function getAllPermissions(int|string $userId, ?string $guard = null): Collection
     {
         $names = $this->loadUserPermissions($userId);
 
@@ -93,7 +93,7 @@ class PermissionResolver implements PermissionResolverInterface
     }
 
     /** @return Collection<int, string> */
-    public function getAllRoles(int $userId, ?string $guard = null): Collection
+    public function getAllRoles(int|string $userId, ?string $guard = null): Collection
     {
         $roles = $this->loadUserRoles($userId);
 
@@ -113,7 +113,7 @@ class PermissionResolver implements PermissionResolverInterface
         $this->superAdminCache = [];
     }
 
-    public function flushUser(int $userId): void
+    public function flushUser(int|string $userId): void
     {
         unset(
             $this->permissionCache[$userId],
@@ -124,7 +124,7 @@ class PermissionResolver implements PermissionResolverInterface
         );
     }
 
-    private function ensureUserCacheExists(int $userId): void
+    private function ensureUserCacheExists(int|string $userId): void
     {
         if (!$this->repository->userCacheExists($userId)) {
             $this->log("Auth cache miss for user {$userId}, warming from database.", 'warning');
@@ -132,7 +132,7 @@ class PermissionResolver implements PermissionResolverInterface
         }
     }
 
-    private function isSuperAdmin(int $userId): bool
+    private function isSuperAdmin(int|string $userId): bool
     {
         if (isset($this->superAdminCache[$userId])) {
             return $this->superAdminCache[$userId];
@@ -151,7 +151,6 @@ class PermissionResolver implements PermissionResolverInterface
 
         $defaultGuard = $this->resolveGuard(null);
 
-        // Check the current guard first (most common case), then remaining guards
         if ($this->repository->userHasRole($userId, "{$defaultGuard}|{$superAdminRole}")) {
             $this->superAdminCache[$userId] = true;
 
@@ -195,7 +194,7 @@ class PermissionResolver implements PermissionResolverInterface
         return $enabled;
     }
 
-    private function matchWildcard(int $userId, string $permission, string $guard): bool
+    private function matchWildcard(int|string $userId, string $permission, string $guard): bool
     {
         $allPermissions = $this->loadUserPermissions($userId);
 
@@ -211,7 +210,7 @@ class PermissionResolver implements PermissionResolverInterface
     }
 
     /** @return array<string> */
-    private function loadUserPermissions(int $userId): array
+    private function loadUserPermissions(int|string $userId): array
     {
         if (isset($this->allPermissionsCache[$userId])) {
             return $this->allPermissionsCache[$userId];
@@ -230,7 +229,7 @@ class PermissionResolver implements PermissionResolverInterface
     }
 
     /** @return array<string> */
-    private function loadUserRoles(int $userId): array
+    private function loadUserRoles(int|string $userId): array
     {
         if (isset($this->allRolesCache[$userId])) {
             return $this->allRolesCache[$userId];

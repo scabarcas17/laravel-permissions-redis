@@ -6,34 +6,34 @@ namespace Scabarcas\LaravelPermissionsRedis\Contracts;
 
 interface PermissionRepositoryInterface
 {
-    public function userHasPermission(int $userId, string $permission): bool;
+    public function userHasPermission(int|string $userId, string $permission): bool;
 
-    public function userHasRole(int $userId, string $role): bool;
-
-    /** @return array<string> */
-    public function getUserPermissions(int $userId): array;
+    public function userHasRole(int|string $userId, string $role): bool;
 
     /** @return array<string> */
-    public function getUserRoles(int $userId): array;
+    public function getUserPermissions(int|string $userId): array;
 
-    /** @return array<int> */
+    /** @return array<string> */
+    public function getUserRoles(int|string $userId): array;
+
+    /** @return array<int|string> */
     public function getRoleUserIds(int $roleId): array;
 
     /** @param array<string> $permissions */
-    public function setUserPermissions(int $userId, array $permissions): void;
+    public function setUserPermissions(int|string $userId, array $permissions): void;
 
     /** @param array<string> $roles */
-    public function setUserRoles(int $userId, array $roles): void;
+    public function setUserRoles(int|string $userId, array $roles): void;
 
     /** @param array<string> $permissions */
     public function setRolePermissions(int $roleId, array $permissions): void;
 
-    /** @param array<int> $userIds */
+    /** @param array<int|string> $userIds */
     public function setRoleUsers(int $roleId, array $userIds): void;
 
-    public function userCacheExists(int $userId): bool;
+    public function userCacheExists(int|string $userId): bool;
 
-    public function deleteUserCache(int $userId): void;
+    public function deleteUserCache(int|string $userId): void;
 
     public function deleteRoleCache(int $roleId): void;
 

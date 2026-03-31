@@ -34,8 +34,13 @@ class CacheInvalidator
 
     public function handlePermissionsSynced(PermissionsSynced $event): void
     {
-        /** @var int $roleId */
-        $roleId = $event->role->getKey();
+        $key = $event->role->getKey();
+
+        if (!is_int($key) && !is_string($key)) {
+            return;
+        }
+
+        $roleId = is_int($key) ? $key : (int) $key;
 
         $this->log("Cache invalidation: role {$roleId} permissions synced.");
 
@@ -52,7 +57,7 @@ class CacheInvalidator
 
     public function handleRolesAssigned(RolesAssigned $event): void
     {
-        /** @var int $userId */
+        /** @var int|string $userId */
         $userId = $event->user->getKey();
 
         $this->log("Cache invalidation: user {$userId} roles assigned.");
@@ -88,7 +93,7 @@ class CacheInvalidator
         $this->repository->deleteUserCache($userId);
     }
 
-    private function rewarmUserRoleIndexes(int $userId): void
+    private function rewarmUserRoleIndexes(int|string $userId): void
     {
         /** @var string $userModel */
         $userModel = config('permissions-redis.user_model', 'App\\Models\\User');

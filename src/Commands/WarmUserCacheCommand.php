@@ -15,7 +15,9 @@ class WarmUserCacheCommand extends Command
 
     public function handle(AuthorizationCacheManager $cacheManager): int
     {
-        $userId = (int) $this->argument('userId');
+        /** @var string $rawId */
+        $rawId = $this->argument('userId');
+        $userId = ctype_digit($rawId) ? (int) $rawId : $rawId;
 
         $this->info("Warming authorization cache for user {$userId}...");
 

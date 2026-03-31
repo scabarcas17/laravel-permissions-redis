@@ -38,7 +38,7 @@ class AuthorizationCacheManager
         $this->log('Cache rewarm completed (no flush).');
     }
 
-    public function warmUser(int $userId): void
+    public function warmUser(int|string $userId): void
     {
         $permissions = $this->computeUserPermissions($userId);
         $roles = $this->getUserRoleNames($userId);
@@ -69,7 +69,7 @@ class AuthorizationCacheManager
         $this->log('Warmed cache for ' . count($affectedUserIds) . " users affected by permission [{$permissionId}].");
     }
 
-    public function evictUser(int $userId): void
+    public function evictUser(int|string $userId): void
     {
         $this->repository->deleteUserCache($userId);
     }
@@ -79,7 +79,7 @@ class AuthorizationCacheManager
         $this->repository->deleteRoleCache($roleId);
     }
 
-    /** @return array<int> */
+    /** @return array<int|string> */
     public function getUserIdsAffectedByPermission(int $permissionId): array
     {
         $modelType = $this->userModelType();
@@ -100,11 +100,12 @@ class AuthorizationCacheManager
                 ->pluck('model_id')
             : collect();
 
-        return $directUserIds->merge($roleUserIds)->unique()->values()->map(fn (mixed $id): int => is_numeric($id) ? (int) $id : 0)->all();
+        /** @var array<int|string> */
+        return $directUserIds->merge($roleUserIds)->unique()->values()->all();
     }
 
     /** @return array<string> */
-    private function computeUserPermissions(int $userId): array
+    private function computeUserPermissions(int|string $userId): array
     {
         $rolePermissions = $this->getUserRolePermissionNames($userId);
         $directPermissions = $this->getUserDirectPermissionNames($userId);
@@ -113,7 +114,7 @@ class AuthorizationCacheManager
     }
 
     /** @return array<string> */
-    private function getUserRolePermissionNames(int $userId): array
+    private function getUserRolePermissionNames(int|string $userId): array
     {
         $permissionsTable = $this->table('permissions');
 
@@ -139,7 +140,7 @@ class AuthorizationCacheManager
     }
 
     /** @return array<string> */
-    private function getUserDirectPermissionNames(int $userId): array
+    private function getUserDirectPermissionNames(int|string $userId): array
     {
         $permissionsTable = $this->table('permissions');
 
@@ -159,7 +160,7 @@ class AuthorizationCacheManager
     }
 
     /** @return array<string> */
-    private function getUserRoleNames(int $userId): array
+    private function getUserRoleNames(int|string $userId): array
     {
         $rolesTable = $this->table('roles');
 
@@ -198,17 +199,16 @@ class AuthorizationCacheManager
     }
 
     /**
-     * @return array<int>
+     * @return array<int|string>
      */
     private function getRoleUserIdsFromDb(int $roleId): array
     {
-        /** @var Collection<int, int> $ids */
-        $ids = DB::table($this->table('model_has_roles'))
+        /** @var array<int|string> */
+        return DB::table($this->table('model_has_roles'))
             ->where('role_id', $roleId)
             ->where('model_type', $this->userModelType())
-            ->pluck('model_id');
-
-        return $ids->all();
+            ->pluck('model_id')
+            ->all();
     }
 
     private function warmAllRoles(): void
@@ -239,7 +239,8 @@ class AuthorizationCacheManager
 
         $userIds->chunk(200)->each(function (Collection $chunk): void {
             foreach ($chunk as $userId) {
-                $this->warmUser(is_numeric($userId) ? (int) $userId : 0);
+                /** @var int|string $userId */
+                $this->warmUser($userId);
             }
         });
     }

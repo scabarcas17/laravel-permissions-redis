@@ -12,11 +12,11 @@ class BladeDirectivesRegistrar
     public static function register(): void
     {
         Blade::if('role', static function (string $role): bool {
-            return self::resolveForUser(fn (int $userId, string $guard, PermissionResolverInterface $resolver) => $resolver->hasRole($userId, $role, $guard));
+            return self::resolveForUser(fn (int|string $userId, string $guard, PermissionResolverInterface $resolver) => $resolver->hasRole($userId, $role, $guard));
         });
 
         Blade::if('hasanyrole', static function (string $roles): bool {
-            return self::resolveForUser(function (int $userId, string $guard, PermissionResolverInterface $resolver) use ($roles): bool {
+            return self::resolveForUser(function (int|string $userId, string $guard, PermissionResolverInterface $resolver) use ($roles): bool {
                 foreach (explode('|', $roles) as $role) {
                     if ($resolver->hasRole($userId, trim($role), $guard)) {
                         return true;
@@ -28,7 +28,7 @@ class BladeDirectivesRegistrar
         });
 
         Blade::if('hasallroles', static function (string $roles): bool {
-            return self::resolveForUser(function (int $userId, string $guard, PermissionResolverInterface $resolver) use ($roles): bool {
+            return self::resolveForUser(function (int|string $userId, string $guard, PermissionResolverInterface $resolver) use ($roles): bool {
                 foreach (explode('|', $roles) as $role) {
                     if (!$resolver->hasRole($userId, trim($role), $guard)) {
                         return false;
@@ -40,11 +40,11 @@ class BladeDirectivesRegistrar
         });
 
         Blade::if('permission', static function (string $permission): bool {
-            return self::resolveForUser(fn (int $userId, string $guard, PermissionResolverInterface $resolver) => $resolver->hasPermission($userId, $permission, $guard));
+            return self::resolveForUser(fn (int|string $userId, string $guard, PermissionResolverInterface $resolver) => $resolver->hasPermission($userId, $permission, $guard));
         });
 
         Blade::if('hasanypermission', static function (string $permissions): bool {
-            return self::resolveForUser(function (int $userId, string $guard, PermissionResolverInterface $resolver) use ($permissions): bool {
+            return self::resolveForUser(function (int|string $userId, string $guard, PermissionResolverInterface $resolver) use ($permissions): bool {
                 foreach (explode('|', $permissions) as $permission) {
                     if ($resolver->hasPermission($userId, trim($permission), $guard)) {
                         return true;
@@ -56,7 +56,7 @@ class BladeDirectivesRegistrar
         });
 
         Blade::if('hasallpermissions', static function (string $permissions): bool {
-            return self::resolveForUser(function (int $userId, string $guard, PermissionResolverInterface $resolver) use ($permissions): bool {
+            return self::resolveForUser(function (int|string $userId, string $guard, PermissionResolverInterface $resolver) use ($permissions): bool {
                 foreach (explode('|', $permissions) as $permission) {
                     if (!$resolver->hasPermission($userId, trim($permission), $guard)) {
                         return false;
@@ -68,7 +68,7 @@ class BladeDirectivesRegistrar
         });
     }
 
-    /** @param callable(int, string, PermissionResolverInterface): bool $callback */
+    /** @param callable(int|string, string, PermissionResolverInterface): bool $callback */
     private static function resolveForUser(callable $callback): bool
     {
         $user = auth()->user();
@@ -77,7 +77,7 @@ class BladeDirectivesRegistrar
             return false;
         }
 
-        /** @var int $userId */
+        /** @var int|string $userId */
         $userId = $user->getAuthIdentifier();
         $guard = auth()->getDefaultDriver();
 

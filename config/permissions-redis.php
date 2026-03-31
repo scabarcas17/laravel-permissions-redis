@@ -139,6 +139,57 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Multi-Tenancy
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, Redis keys are prefixed with the current tenant ID,
+    | isolating permissions data per tenant. The resolver callable should
+    | return the current tenant identifier (e.g., tenant ID or domain).
+    |
+    | Built-in resolvers:
+    |   - null                     Disabled (default)
+    |   - 'stancl'                 Auto-detect via tenancy()->getTenant()->getTenantKey()
+    |   - callable/class-string    Custom resolver returning string|int
+    |
+    */
+
+    'tenancy' => [
+        'enabled'  => (bool) env('PERMISSIONS_REDIS_TENANCY_ENABLED', false),
+        'resolver' => env('PERMISSIONS_REDIS_TENANCY_RESOLVER', null),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Octane Support
+    |--------------------------------------------------------------------------
+    |
+    | When running under Laravel Octane, singletons persist across requests.
+    | Enable this to automatically flush in-memory caches between requests,
+    | preventing stale permission data from leaking across requests.
+    |
+    */
+
+    'octane' => [
+        'reset_on_request' => (bool) env('PERMISSIONS_REDIS_OCTANE_RESET', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Model Morph Key Type
+    |--------------------------------------------------------------------------
+    |
+    | Defines the column type used for `model_id` in the pivot tables
+    | (model_has_permissions, model_has_roles). Choose the type that
+    | matches your User model's primary key.
+    |
+    | Supported: "int", "uuid", "ulid"
+    |
+    */
+
+    'model_morph_key_type' => env('PERMISSIONS_REDIS_MORPH_KEY_TYPE', 'int'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Table Names
     |--------------------------------------------------------------------------
     |
@@ -153,6 +204,36 @@ return [
         'model_has_permissions' => 'model_has_permissions',
         'model_has_roles'       => 'model_has_roles',
         'role_has_permissions'  => 'role_has_permissions',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Seed Data
+    |--------------------------------------------------------------------------
+    |
+    | Define your application's roles and permissions here. Run
+    | `php artisan permissions-redis:seed` to create them from this config.
+    |
+    | Format:
+    |   'roles' => [
+    |       'role_name' => ['permission.one', 'permission.two'],
+    |   ],
+    |   'permissions' => ['standalone.permission'],
+    |
+    | Permissions listed under roles are created automatically.
+    | The 'permissions' key is for standalone permissions not tied to any role.
+    |
+    */
+
+    'seed' => [
+        'roles' => [
+            // 'admin'  => ['users.*', 'posts.*', 'settings.update'],
+            // 'editor' => ['posts.create', 'posts.edit', 'posts.delete'],
+            // 'viewer' => ['posts.view', 'reports.view'],
+        ],
+        'permissions' => [
+            // 'reports.export',
+        ],
     ],
 
 ];

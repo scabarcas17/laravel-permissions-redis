@@ -18,9 +18,19 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     private ?int $cachedTtl = null;
 
     /**
+     * Reset cached state between Octane requests.
+     */
+    public function resetState(): void
+    {
+        $this->cachedConnection = null;
+        $this->cachedPrefix = null;
+        $this->cachedTtl = null;
+    }
+
+    /**
      * @throws Throwable
      */
-    public function userHasPermission(int $userId, string $permission): bool
+    public function userHasPermission(int|string $userId, string $permission): bool
     {
         return (bool) $this->connection()->command('sismember', [
             $this->userPermissionsKey($userId),
@@ -31,7 +41,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     /**
      * @throws Throwable
      */
-    public function userHasRole(int $userId, string $role): bool
+    public function userHasRole(int|string $userId, string $role): bool
     {
         return (bool) $this->connection()->command('sismember', [
             $this->userRolesKey($userId),
@@ -44,7 +54,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
      *
      * @return array<string>
      */
-    public function getUserPermissions(int $userId): array
+    public function getUserPermissions(int|string $userId): array
     {
         /** @var array<string> $members */
         $members = $this->connection()->command('smembers', [
@@ -59,7 +69,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
      *
      * @return array<string>
      */
-    public function getUserRoles(int $userId): array
+    public function getUserRoles(int|string $userId): array
     {
         /** @var array<string> $members */
         $members = $this->connection()->command('smembers', [
@@ -72,7 +82,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     /**
      * @throws Throwable
      *
-     * @return array<int>
+     * @return array<int|string>
      */
     public function getRoleUserIds(int $roleId): array
     {
@@ -81,13 +91,18 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
             $this->roleUsersKey($roleId),
         ]);
 
-        return array_map('intval', array_filter($members ?: [], fn (string $m): bool => $m !== '__empty__'));
+        $filtered = array_filter($members ?: [], fn (string $m): bool => $m !== '__empty__');
+
+        return array_values(array_map(
+            fn (string $id): int|string => ctype_digit($id) ? (int) $id : $id,
+            $filtered,
+        ));
     }
 
     /** @param array<string> $permissions
      * @throws Throwable
      */
-    public function setUserPermissions(int $userId, array $permissions): void
+    public function setUserPermissions(int|string $userId, array $permissions): void
     {
         $this->replaceSet($this->userPermissionsKey($userId), $permissions);
     }
@@ -95,7 +110,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     /** @param array<string> $roles
      * @throws Throwable
      */
-    public function setUserRoles(int $userId, array $roles): void
+    public function setUserRoles(int|string $userId, array $roles): void
     {
         $this->replaceSet($this->userRolesKey($userId), $roles);
     }
@@ -108,7 +123,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         $this->replaceSet($this->rolePermissionsKey($roleId), $permissions);
     }
 
-    /** @param array<int> $userIds
+    /** @param array<int|string> $userIds
      * @throws Throwable
      */
     public function setRoleUsers(int $roleId, array $userIds): void
@@ -121,7 +136,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     /**
      * @throws Throwable
      */
-    public function userCacheExists(int $userId): bool
+    public function userCacheExists(int|string $userId): bool
     {
         return (bool) $this->connection()->command('exists', [
             $this->userPermissionsKey($userId),
@@ -131,7 +146,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     /**
      * @throws Throwable
      */
-    public function deleteUserCache(int $userId): void
+    public function deleteUserCache(int|string $userId): void
     {
         $this->connection()->command('del', [
             $this->userPermissionsKey($userId),
@@ -192,12 +207,12 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         $connection->command('exec');
     }
 
-    private function userPermissionsKey(int $userId): string
+    private function userPermissionsKey(int|string $userId): string
     {
         return $this->prefix() . "user:{$userId}:permissions";
     }
 
-    private function userRolesKey(int $userId): string
+    private function userRolesKey(int|string $userId): string
     {
         return $this->prefix() . "user:{$userId}:roles";
     }

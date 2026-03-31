@@ -11,7 +11,7 @@ class UserDeleted
     use Dispatchable;
 
     public function __construct(
-        public readonly int $userId,
+        public readonly int|string $userId,
     ) {
     }
 }

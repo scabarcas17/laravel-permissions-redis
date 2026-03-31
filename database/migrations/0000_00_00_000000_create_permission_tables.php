@@ -10,6 +10,7 @@ return new class () extends Migration {
     public function up(): void
     {
         $tables = config('permissions-redis.tables', []);
+        $morphKeyType = config('permissions-redis.model_morph_key_type', 'int');
 
         // 1. permissions table
         Schema::create($tables['permissions'] ?? 'permissions', function (Blueprint $table) {
@@ -37,10 +38,10 @@ return new class () extends Migration {
         $permissionsTable = $tables['permissions'] ?? 'permissions';
         $modelHasPermissions = $tables['model_has_permissions'] ?? 'model_has_permissions';
 
-        Schema::create($modelHasPermissions, function (Blueprint $table) use ($permissionsTable) {
+        Schema::create($modelHasPermissions, function (Blueprint $table) use ($permissionsTable, $morphKeyType) {
             $table->unsignedBigInteger('permission_id');
             $table->string('model_type');
-            $table->unsignedBigInteger('model_id');
+            $this->addMorphKeyColumn($table, $morphKeyType);
             $table->index(['model_id', 'model_type'], 'model_has_permissions_model_id_model_type_index');
             $table->foreign('permission_id')->references('id')->on($permissionsTable)->onDelete('cascade');
             $table->primary(['permission_id', 'model_id', 'model_type'], 'model_has_permissions_permission_model_type_primary');
@@ -61,10 +62,10 @@ return new class () extends Migration {
         // 5. model_has_roles pivot
         $modelHasRoles = $tables['model_has_roles'] ?? 'model_has_roles';
 
-        Schema::create($modelHasRoles, function (Blueprint $table) use ($rolesTable) {
+        Schema::create($modelHasRoles, function (Blueprint $table) use ($rolesTable, $morphKeyType) {
             $table->unsignedBigInteger('role_id');
             $table->string('model_type');
-            $table->unsignedBigInteger('model_id');
+            $this->addMorphKeyColumn($table, $morphKeyType);
             $table->index(['model_id', 'model_type'], 'model_has_roles_model_id_model_type_index');
             $table->foreign('role_id')->references('id')->on($rolesTable)->onDelete('cascade');
             $table->primary(['role_id', 'model_id', 'model_type'], 'model_has_roles_role_model_type_primary');
@@ -80,5 +81,14 @@ return new class () extends Migration {
         Schema::dropIfExists($tables['model_has_permissions'] ?? 'model_has_permissions');
         Schema::dropIfExists($tables['roles'] ?? 'roles');
         Schema::dropIfExists($tables['permissions'] ?? 'permissions');
+    }
+
+    private function addMorphKeyColumn(Blueprint $table, string $type): void
+    {
+        match ($type) {
+            'uuid'  => $table->uuid('model_id'),
+            'ulid'  => $table->ulid('model_id'),
+            default => $table->unsignedBigInteger('model_id'),
+        };
     }
 };

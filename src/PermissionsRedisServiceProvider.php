@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Scabarcas\LaravelPermissionsRedis;
 
+use Closure;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Container\BindingResolutionException;
@@ -14,8 +15,11 @@ use Illuminate\Support\ServiceProvider;
 use Scabarcas\LaravelPermissionsRedis\Blade\BladeDirectivesRegistrar;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Cache\RedisPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Cache\TenantAwareRedisPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Commands\CacheStatsCommand;
 use Scabarcas\LaravelPermissionsRedis\Commands\FlushCacheCommand;
+use Scabarcas\LaravelPermissionsRedis\Commands\MigrateFromSpatieCommand;
+use Scabarcas\LaravelPermissionsRedis\Commands\SeedCommand;
 use Scabarcas\LaravelPermissionsRedis\Commands\WarmCacheCommand;
 use Scabarcas\LaravelPermissionsRedis\Commands\WarmUserCacheCommand;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
@@ -33,7 +37,19 @@ class PermissionsRedisServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/permissions-redis.php', 'permissions-redis');
 
-        $this->app->singleton(PermissionRepositoryInterface::class, RedisPermissionRepository::class);
+        $this->app->singleton(RedisPermissionRepository::class);
+
+        if (config('permissions-redis.tenancy.enabled', false)) {
+            $this->app->singleton(PermissionRepositoryInterface::class, function (): TenantAwareRedisPermissionRepository {
+                return new TenantAwareRedisPermissionRepository(
+                    $this->app->make(RedisPermissionRepository::class),
+                    $this->resolveTenantResolver(),
+                );
+            });
+        } else {
+            $this->app->singleton(PermissionRepositoryInterface::class, RedisPermissionRepository::class);
+        }
+
         $this->app->singleton(AuthorizationCacheManager::class);
         $this->app->singleton(PermissionResolverInterface::class, PermissionResolver::class);
     }
@@ -61,6 +77,10 @@ class PermissionsRedisServiceProvider extends ServiceProvider
 
         if (config('permissions-redis.warm_on_login', true)) {
             $this->registerWarmOnLogin();
+        }
+
+        if (config('permissions-redis.octane.reset_on_request', false)) {
+            $this->registerOctaneReset();
         }
     }
 
@@ -92,6 +112,8 @@ class PermissionsRedisServiceProvider extends ServiceProvider
                 WarmUserCacheCommand::class,
                 FlushCacheCommand::class,
                 CacheStatsCommand::class,
+                MigrateFromSpatieCommand::class,
+                SeedCommand::class,
             ]);
         }
     }
@@ -109,7 +131,7 @@ class PermissionsRedisServiceProvider extends ServiceProvider
             /** @var PermissionResolverInterface $resolver */
             $resolver = app(PermissionResolverInterface::class);
 
-            /** @var int $userId */
+            /** @var int|string $userId */
             $userId = $user->getAuthIdentifier();
 
             $guard = auth()->getDefaultDriver();
@@ -143,5 +165,67 @@ class PermissionsRedisServiceProvider extends ServiceProvider
     private function registerWarmOnLogin(): void
     {
         Event::listen(Login::class, WarmCacheOnLogin::class);
+    }
+
+    /**
+     * @return Closure(): (string|int|null)
+     * @throws BindingResolutionException
+     */
+    private function resolveTenantResolver(): Closure
+    {
+        /** @var string|null $resolver */
+        $resolver = config('permissions-redis.tenancy.resolver');
+
+        if ($resolver === 'stancl') {
+            return static function (): string|int|null {
+                $tenancyClass = 'Stancl\\Tenancy\\Tenancy';
+
+                if (!class_exists($tenancyClass) || !app()->bound($tenancyClass)) {
+                    return null;
+                }
+
+                $tenancy = app($tenancyClass);
+
+                if (!is_object($tenancy) || !method_exists($tenancy, 'getTenant')) {
+                    return null;
+                }
+
+                $tenant = $tenancy->getTenant();
+
+                if (!is_object($tenant) || !method_exists($tenant, 'getTenantKey')) {
+                    return null;
+                }
+
+                $key = $tenant->getTenantKey();
+
+                return is_string($key) || is_int($key) ? $key : null;
+            };
+        }
+
+        if (is_string($resolver) && class_exists($resolver)) {
+            /** @var Closure(): (string|int|null) */
+            return $this->app->make($resolver);
+        }
+
+        return static fn (): null => null;
+    }
+
+    private function registerOctaneReset(): void
+    {
+        $requestReceived = 'Laravel\Octane\Events\RequestReceived';
+
+        if (!class_exists($requestReceived)) {
+            return;
+        }
+
+        Event::listen($requestReceived, function (): void {
+            /** @var PermissionResolverInterface $resolver */
+            $resolver = $this->app->make(PermissionResolverInterface::class);
+            $resolver->flush();
+
+            /** @var RedisPermissionRepository $repository */
+            $repository = $this->app->make(RedisPermissionRepository::class);
+            $repository->resetState();
+        });
     }
 }

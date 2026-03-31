@@ -20,7 +20,7 @@ class WarmCacheOnLogin
         /** @var Model $user */
         $user = $event->user;
 
-        /** @var int $userId */
+        /** @var int|string $userId */
         $userId = $user->getKey();
 
         $this->cacheManager->warmUser($userId);
