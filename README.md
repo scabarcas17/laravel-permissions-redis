@@ -100,6 +100,8 @@ Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permis
 
 ## Architecture
 
+> **Note:** The diagrams below use [Mermaid](https://mermaid.js.org/). If they appear as code blocks, [view them rendered on GitHub](https://github.com/scabarcas17/laravel-permissions-redis#architecture).
+
 ### System Context
 
 ```mermaid
@@ -763,7 +765,7 @@ Role-related keys (`auth:role:*`) are shared across tenants since they reference
 
 ## Integrations
 
-This package works well with Laravel Policies, Sanctum/Passport, and Pulse. See the **[full integrations guide](docs/integrations.md)** for detailed examples.
+This package works well with Laravel Policies, Sanctum/Passport, and Pulse. See the **[full integrations guide](https://github.com/scabarcas17/laravel-permissions-redis/blob/main/docs/integrations.md)** for detailed examples.
 
 ### Laravel Policies
 
@@ -799,11 +801,11 @@ Route::middleware(['auth:sanctum', 'permission:posts.create'])
     ->post('/posts', [PostController::class, 'store']);
 ```
 
-For dual enforcement (token ability + user permission), see the [custom middleware example](docs/integrations.md#custom-middleware-for-dual-checks) in the integrations guide.
+For dual enforcement (token ability + user permission), see the [custom middleware example](https://github.com/scabarcas17/laravel-permissions-redis/blob/main/docs/integrations.md#custom-middleware-for-dual-checks) in the integrations guide.
 
 ### Laravel Pulse
 
-Track permission check performance with a custom Pulse recorder. The [integrations guide](docs/integrations.md#laravel-pulse) includes a complete setup with recorder, decorator, and dashboard card — no Pulse dependency required in this package.
+Track permission check performance with a custom Pulse recorder. The [integrations guide](https://github.com/scabarcas17/laravel-permissions-redis/blob/main/docs/integrations.md#laravel-pulse) includes a complete setup with recorder, decorator, and dashboard card — no Pulse dependency required in this package.
 
 ---
 
@@ -1202,42 +1204,42 @@ $this->app->singleton(
 | Feature | spatie/laravel-permission | laravel-permissions-redis |
 |---------|:------------------------:|:-------------------------:|
 | **Core** | | |
-| Assign roles to users | :white_check_mark: | :white_check_mark: |
-| Assign permissions to roles | :white_check_mark: | :white_check_mark: |
-| Assign direct permissions to users | :white_check_mark: | :white_check_mark: |
-| Multiple guard support | :white_check_mark: | :white_check_mark: |
-| Fluent guard scoping (`forGuard()`) | :x: | :white_check_mark: |
-| `BackedEnum` support for roles/permissions | :white_check_mark: | :white_check_mark: |
-| UUID / ULID primary keys | :white_check_mark: | :white_check_mark: |
+| Assign roles to users | ✅ | ✅ |
+| Assign permissions to roles | ✅ | ✅ |
+| Assign direct permissions to users | ✅ | ✅ |
+| Multiple guard support | ✅ | ✅ |
+| Fluent guard scoping (`forGuard()`) | ❌ | ✅ |
+| `BackedEnum` support for roles/permissions | ✅ | ✅ |
+| UUID / ULID primary keys | ✅ | ✅ |
 | **Querying** | | |
-| `hasRole` / `hasAnyRole` / `hasAllRoles` | :white_check_mark: | :white_check_mark: |
-| `hasPermissionTo` / `hasAnyPermission` / `hasAllPermissions` | :white_check_mark: | :white_check_mark: |
-| `getDirectPermissions()` | :white_check_mark: | :x: |
-| `getPermissionsViaRoles()` | :white_check_mark: | :x: |
-| Query scopes (`scopeRole`, `scopePermission`) | :white_check_mark: | :white_check_mark: |
+| `hasRole` / `hasAnyRole` / `hasAllRoles` | ✅ | ✅ |
+| `hasPermissionTo` / `hasAnyPermission` / `hasAllPermissions` | ✅ | ✅ |
+| `getDirectPermissions()` | ✅ | ❌ |
+| `getPermissionsViaRoles()` | ✅ | ❌ |
+| Query scopes (`scopeRole`, `scopePermission`) | ✅ | ✅ |
 | **Cache** | | |
 | Cache backend | Laravel Cache (any driver) | Redis directly (SET structures) |
 | Permission check complexity | O(n) array scan | O(1) `SISMEMBER` |
-| In-memory request cache | :x: | :white_check_mark: |
+| In-memory request cache | ❌ | ✅ |
 | Automatic cache invalidation | Forget all on change | Surgical warm per user/role |
-| Cache warm on login | :x: | :white_check_mark: |
-| Cache warm CLI | :x: | :white_check_mark: (`permissions-redis:warm`) |
-| Cache statistics CLI | :x: | :white_check_mark: (`permissions-redis:stats`) |
+| Cache warm on login | ❌ | ✅ |
+| Cache warm CLI | ❌ | ✅ (`permissions-redis:warm`) |
+| Cache statistics CLI | ❌ | ✅ (`permissions-redis:stats`) |
 | **Middleware & Blade** | | |
-| `permission` / `role` / `role_or_permission` middleware | :white_check_mark: | :white_check_mark: |
-| AND (`&`) / OR (`\|`) operators in middleware | :white_check_mark: | :white_check_mark: |
-| `@role` / `@hasanyrole` / `@hasallroles` | :white_check_mark: | :white_check_mark: |
-| `@permission` / `@hasanypermission` / `@hasallpermissions` | :x: | :white_check_mark: |
-| `@unlessrole` | :white_check_mark: | :x: (use `@role ... @else`) |
-| Gate integration (`@can`, `authorize()`) | :white_check_mark: | :white_check_mark: |
+| `permission` / `role` / `role_or_permission` middleware | ✅ | ✅ |
+| AND (`&`) / OR (`\|`) operators in middleware | ✅ | ✅ |
+| `@role` / `@hasanyrole` / `@hasallroles` | ✅ | ✅ |
+| `@permission` / `@hasanypermission` / `@hasallpermissions` | ❌ | ✅ |
+| `@unlessrole` | ✅ | ❌ (use `@role ... @else`) |
+| Gate integration (`@can`, `authorize()`) | ✅ | ✅ |
 | **Advanced** | | |
-| Wildcard permissions (`fnmatch`) | Partial | :white_check_mark: |
-| Super admin role (bypass all checks) | :x: | :white_check_mark: |
-| Laravel Octane support | :x: | :white_check_mark: |
-| Multi-tenancy (Redis key isolation) | Teams feature | :white_check_mark: |
-| Permission groups | :x: | :white_check_mark: |
-| Testing helpers trait | :x: | :white_check_mark: (`WithPermissions`) |
-| Migration from Spatie CLI | — | :white_check_mark: |
+| Wildcard permissions (`fnmatch`) | Partial | ✅ |
+| Super admin role (bypass all checks) | ❌ | ✅ |
+| Laravel Octane support | ❌ | ✅ |
+| Multi-tenancy (Redis key isolation) | Teams feature | ✅ |
+| Permission groups | ❌ | ✅ |
+| Testing helpers trait | ❌ | ✅ (`WithPermissions`) |
+| Migration from Spatie CLI | — | ✅ |
 | **Requirements** | | |
 | PHP | 8.0+ | 8.3+ |
 | Laravel | 8 – 13 | 11 – 13 |
@@ -1312,7 +1314,7 @@ See the [benchmark repository](https://github.com/scabarcas17/laravel-permission
 
 Coming from `spatie/laravel-permission`? The API is intentionally similar — most changes are namespace swaps and config adjustments.
 
-See the **[full migration guide](docs/migration-from-spatie.md)** for:
+See the **[full migration guide](https://github.com/scabarcas17/laravel-permissions-redis/blob/main/docs/migration-from-spatie.md)** for:
 
 - Step-by-step migration instructions
 - Method equivalence table (Spatie → this package)
@@ -1454,7 +1456,7 @@ php artisan permissions-redis:migrate-from-spatie
 
 **Fix:**
 
-1. **Both installed (during migration):** Both packages register the same middleware aliases (`permission`, `role`, `role_or_permission`). Whichever service provider loads last wins. This is expected during migration. Follow the [migration guide](docs/migration-from-spatie.md).
+1. **Both installed (during migration):** Both packages register the same middleware aliases (`permission`, `role`, `role_or_permission`). Whichever service provider loads last wins. This is expected during migration. Follow the [migration guide](https://github.com/scabarcas17/laravel-permissions-redis/blob/main/docs/migration-from-spatie.md).
 
 2. **After removing Spatie:**
    ```bash
