@@ -148,8 +148,9 @@ First stable release of `scabarcas/laravel-permissions-redis`.
 - **Comprehensive test suite** — Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
 - **Documentation** — README with installation guide, usage examples, conventions, API reference, and C4 architecture diagrams.
 
-[3.0.0]: https://github.com/scabarcas/laravel-permissions-redis/compare/v2.0.0...v3.0.0
-[2.0.0]: https://github.com/scabarcas/laravel-permissions-redis/compare/v1.1.0...v2.0.0
-[1.1.0]: https://github.com/scabarcas/laravel-permissions-redis/compare/v1.0.1...v1.1.0
-[1.0.1]: https://github.com/scabarcas/laravel-permissions-redis/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/scabarcas/laravel-permissions-redis/releases/tag/v1.0.0
+[4.0.0-beta.1]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v3.0.0...v4.0.0-beta.1
+[3.0.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v2.0.0...v3.0.0
+[2.0.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v1.1.0...v2.0.0
+[1.1.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v1.0.1...v1.1.0
+[1.0.1]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/scabarcas17/laravel-permissions-redis/releases/tag/v1.0.0
