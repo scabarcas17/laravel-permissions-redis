@@ -7,6 +7,7 @@ namespace Scabarcas\LaravelPermissionsRedis\Models;
 use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 
 /**
  * @property int         $id
@@ -45,6 +46,13 @@ class Permission extends Model
 
     protected static function booted(): void
     {
+        static::saved(function (Permission $permission): void {
+            /** @var PermissionRepositoryInterface $repository */
+            $repository = app(PermissionRepositoryInterface::class);
+            $encoded = "{$permission->guard_name}|{$permission->name}";
+            $repository->setPermissionGroups([$encoded => $permission->group]);
+        });
+
         static::updated(function (Permission $permission): void {
             /** @var AuthorizationCacheManager $cacheManager */
             $cacheManager = app(AuthorizationCacheManager::class);
@@ -55,6 +63,7 @@ class Permission extends Model
             /** @var AuthorizationCacheManager $cacheManager */
             $cacheManager = app(AuthorizationCacheManager::class);
             $permission->setAttribute('_affected_user_ids', $cacheManager->getUserIdsAffectedByPermission($permission->id));
+            $permission->setAttribute('_encoded_name', "{$permission->guard_name}|{$permission->name}");
         });
 
         static::deleted(function (Permission $permission): void {
@@ -66,6 +75,15 @@ class Permission extends Model
 
             foreach ($affectedUserIds as $userId) {
                 $cacheManager->warmUser($userId);
+            }
+
+            /** @var string|null $encoded */
+            $encoded = $permission->getAttribute('_encoded_name');
+
+            if (is_string($encoded) && $encoded !== '') {
+                /** @var PermissionRepositoryInterface $repository */
+                $repository = app(PermissionRepositoryInterface::class);
+                $repository->deletePermissionGroup($encoded);
             }
         });
     }

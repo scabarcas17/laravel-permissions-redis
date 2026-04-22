@@ -24,11 +24,17 @@ class PermissionResolver implements PermissionResolverInterface
     /** @var array<int|string, array<string>|null> */
     private array $allPermissionsCache = [];
 
+    /** @var array<int|string, array<string, string|null>> */
+    private array $permissionGroupsCache = [];
+
     /** @var array<int|string, array<string>|null> */
     private array $allRolesCache = [];
 
     /** @var array<int|string, bool> */
     private array $superAdminCache = [];
+
+    /** @var array<int|string, float> */
+    private array $warmAttempts = [];
 
     public function __construct(
         private readonly PermissionRepositoryInterface $repository,
@@ -50,6 +56,7 @@ class PermissionResolver implements PermissionResolverInterface
         }
 
         $this->ensureUserCacheExists($userId);
+        $this->evictIfNeeded();
 
         $result = $this->repository->userHasPermission($userId, $cacheKey);
 
@@ -72,6 +79,7 @@ class PermissionResolver implements PermissionResolverInterface
         }
 
         $this->ensureUserCacheExists($userId);
+        $this->evictIfNeeded();
 
         $result = $this->repository->userHasRole($userId, $cacheKey);
 
@@ -85,11 +93,30 @@ class PermissionResolver implements PermissionResolverInterface
     {
         $names = $this->loadUserPermissions($userId);
 
-        return collect($names)
-            ->map(fn (string $encoded): array => $this->decodeEntry($encoded))
-            ->when($guard !== null, fn (Collection $c) => $c->filter(fn (array $entry): bool => $entry[0] === $guard))
-            ->map(fn (array $entry): PermissionDTO => new PermissionDTO(name: $entry[1], guard: $entry[0]))
-            ->values();
+        if ($names === []) {
+            return new Collection();
+        }
+
+        $groups = $this->loadPermissionGroups($userId, $names);
+
+        /** @var array<int, PermissionDTO> $dtos */
+        $dtos = [];
+
+        foreach ($names as $encoded) {
+            [$guardName, $permissionName] = $this->decodeEntry($encoded);
+
+            if ($guard !== null && $guardName !== $guard) {
+                continue;
+            }
+
+            $dtos[] = new PermissionDTO(
+                name: $permissionName,
+                group: $groups[$encoded] ?? null,
+                guard: $guardName,
+            );
+        }
+
+        return new Collection($dtos);
     }
 
     /** @return Collection<int, string> */
@@ -109,8 +136,10 @@ class PermissionResolver implements PermissionResolverInterface
         $this->permissionCache = [];
         $this->roleCache = [];
         $this->allPermissionsCache = [];
+        $this->permissionGroupsCache = [];
         $this->allRolesCache = [];
         $this->superAdminCache = [];
+        $this->warmAttempts = [];
     }
 
     public function flushUser(int|string $userId): void
@@ -119,17 +148,60 @@ class PermissionResolver implements PermissionResolverInterface
             $this->permissionCache[$userId],
             $this->roleCache[$userId],
             $this->allPermissionsCache[$userId],
+            $this->permissionGroupsCache[$userId],
             $this->allRolesCache[$userId],
             $this->superAdminCache[$userId],
+            $this->warmAttempts[$userId],
         );
+    }
+
+    private function evictIfNeeded(): void
+    {
+        /** @var int $limit */
+        $limit = config('permissions-redis.resolver_cache_limit', 1000);
+
+        if (count($this->permissionCache) <= $limit) {
+            return;
+        }
+
+        $evictCount = (int) ($limit / 2);
+
+        $this->permissionCache = array_slice($this->permissionCache, $evictCount, null, true);
+        $this->roleCache = array_slice($this->roleCache, $evictCount, null, true);
+        $this->allPermissionsCache = array_slice($this->allPermissionsCache, $evictCount, null, true);
+        $this->permissionGroupsCache = array_slice($this->permissionGroupsCache, $evictCount, null, true);
+        $this->allRolesCache = array_slice($this->allRolesCache, $evictCount, null, true);
+        $this->superAdminCache = array_slice($this->superAdminCache, $evictCount, null, true);
     }
 
     private function ensureUserCacheExists(int|string $userId): void
     {
-        if (!$this->repository->userCacheExists($userId)) {
-            $this->log("Auth cache miss for user {$userId}, warming from database.", 'warning');
-            $this->cacheManager->warmUser($userId);
+        if ($this->repository->userCacheExists($userId)) {
+            return;
         }
+
+        $cooldown = $this->warmCooldownSeconds();
+
+        if ($cooldown > 0.0 && isset($this->warmAttempts[$userId])) {
+            $elapsed = microtime(true) - $this->warmAttempts[$userId];
+
+            if ($elapsed < $cooldown) {
+                return;
+            }
+        }
+
+        $this->warmAttempts[$userId] = microtime(true);
+
+        $this->log("Auth cache miss for user {$userId}, warming from database.", 'warning');
+        $this->cacheManager->warmUser($userId);
+    }
+
+    private function warmCooldownSeconds(): float
+    {
+        /** @var float|int $cooldown */
+        $cooldown = config('permissions-redis.resolver_warm_cooldown', 1.0);
+
+        return (float) $cooldown;
     }
 
     private function isSuperAdmin(int|string $userId): bool
@@ -147,25 +219,13 @@ class PermissionResolver implements PermissionResolverInterface
             return false;
         }
 
-        $this->ensureUserCacheExists($userId);
+        // Single SMEMBERS call instead of one SISMEMBER per guard
+        $roles = $this->loadUserRoles($userId);
 
-        $defaultGuard = $this->resolveGuard(null);
+        foreach ($roles as $encoded) {
+            [, $name] = $this->decodeEntry($encoded);
 
-        if ($this->repository->userHasRole($userId, "{$defaultGuard}|{$superAdminRole}")) {
-            $this->superAdminCache[$userId] = true;
-
-            return true;
-        }
-
-        /** @var array<string, array<string, mixed>> $guards */
-        $guards = config('auth.guards', ['web' => []]);
-
-        foreach (array_keys($guards) as $guard) {
-            if ($guard === $defaultGuard) {
-                continue;
-            }
-
-            if ($this->repository->userHasRole($userId, "{$guard}|{$superAdminRole}")) {
+            if ($name === $superAdminRole) {
                 $this->superAdminCache[$userId] = true;
 
                 return true;
@@ -226,6 +286,29 @@ class PermissionResolver implements PermissionResolverInterface
         }
 
         return $names;
+    }
+
+    /**
+     * @param array<string> $encodedNames
+     *
+     * @return array<string, string|null>
+     */
+    private function loadPermissionGroups(int|string $userId, array $encodedNames): array
+    {
+        if (isset($this->permissionGroupsCache[$userId])) {
+            return $this->permissionGroupsCache[$userId];
+        }
+
+        if ($encodedNames === []) {
+            $this->permissionGroupsCache[$userId] = [];
+
+            return [];
+        }
+
+        $groups = $this->repository->getPermissionGroups($encodedNames);
+        $this->permissionGroupsCache[$userId] = $groups;
+
+        return $groups;
     }
 
     /** @return array<string> */

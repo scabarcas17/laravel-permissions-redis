@@ -184,3 +184,52 @@ test('Role deleted event dispatches RoleDeleted', function () {
         return $event->roleId === $roleId;
     });
 });
+
+test('Permission saved hook syncs group metadata to Redis hash', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+    $this->app->singleton(AuthorizationCacheManager::class, fn () => new AuthorizationCacheManager($repo));
+
+    Permission::create([
+        'name'       => 'users.create',
+        'guard_name' => 'web',
+        'group'      => 'User Management',
+    ]);
+
+    expect($repo->getPermissionGroups(['web|users.create']))
+        ->toBe(['web|users.create' => 'User Management']);
+});
+
+test('Permission saved with null group stores null in Redis hash', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+    $this->app->singleton(AuthorizationCacheManager::class, fn () => new AuthorizationCacheManager($repo));
+
+    Permission::create([
+        'name'       => 'users.create',
+        'guard_name' => 'web',
+    ]);
+
+    expect($repo->getPermissionGroups(['web|users.create']))
+        ->toBe(['web|users.create' => null]);
+});
+
+test('Permission deleted hook removes group metadata from Redis hash', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+    $this->app->singleton(AuthorizationCacheManager::class, fn () => new AuthorizationCacheManager($repo));
+
+    $perm = Permission::create([
+        'name'       => 'users.create',
+        'guard_name' => 'web',
+        'group'      => 'User Management',
+    ]);
+
+    expect($repo->getPermissionGroups(['web|users.create']))
+        ->toBe(['web|users.create' => 'User Management']);
+
+    $perm->delete();
+
+    expect($repo->getPermissionGroups(['web|users.create']))
+        ->toBe(['web|users.create' => null]);
+});

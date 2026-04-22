@@ -7,10 +7,18 @@ namespace Scabarcas\LaravelPermissionsRedis\Cache;
 use Illuminate\Redis\Connections\Connection;
 use Illuminate\Support\Facades\Redis;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Exceptions\TransactionFailedException;
 use Throwable;
 
 class RedisPermissionRepository implements PermissionRepositoryInterface
 {
+    /**
+     * Sentinel value stored in empty Redis sets so that key existence
+     * reflects "cache populated" rather than "no data". The null bytes make
+     * collisions with real permission/role names effectively impossible.
+     */
+    public const EMPTY_SENTINEL = "\0__lpr_empty__\0";
+
     private ?Connection $cachedConnection = null;
 
     private ?string $cachedPrefix = null;
@@ -51,6 +59,17 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
 
     /**
      * @throws Throwable
+     */
+    public function roleHasPermission(int|string $roleId, string $permission): bool
+    {
+        return (bool) $this->connection()->command('sismember', [
+            $this->rolePermissionsKey($roleId),
+            $permission,
+        ]);
+    }
+
+    /**
+     * @throws Throwable
      *
      * @return array<string>
      */
@@ -61,7 +80,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
             $this->userPermissionsKey($userId),
         ]);
 
-        return array_values(array_filter($members ?: [], fn (string $m): bool => $m !== '__empty__'));
+        return array_values(array_filter($members ?: [], fn (string $m): bool => $m !== self::EMPTY_SENTINEL));
     }
 
     /**
@@ -76,7 +95,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
             $this->userRolesKey($userId),
         ]);
 
-        return array_values(array_filter($members ?: [], fn (string $m): bool => $m !== '__empty__'));
+        return array_values(array_filter($members ?: [], fn (string $m): bool => $m !== self::EMPTY_SENTINEL));
     }
 
     /**
@@ -84,14 +103,14 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
      *
      * @return array<int|string>
      */
-    public function getRoleUserIds(int $roleId): array
+    public function getRoleUserIds(int|string $roleId): array
     {
         /** @var array<string> $members */
         $members = $this->connection()->command('smembers', [
             $this->roleUsersKey($roleId),
         ]);
 
-        $filtered = array_filter($members ?: [], fn (string $m): bool => $m !== '__empty__');
+        $filtered = array_filter($members ?: [], fn (string $m): bool => $m !== self::EMPTY_SENTINEL);
 
         return array_values(array_map(
             fn (string $id): int|string => ctype_digit($id) ? (int) $id : $id,
@@ -118,7 +137,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     /** @param array<string> $permissions
      * @throws Throwable
      */
-    public function setRolePermissions(int $roleId, array $permissions): void
+    public function setRolePermissions(int|string $roleId, array $permissions): void
     {
         $this->replaceSet($this->rolePermissionsKey($roleId), $permissions);
     }
@@ -126,7 +145,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     /** @param array<int|string> $userIds
      * @throws Throwable
      */
-    public function setRoleUsers(int $roleId, array $userIds): void
+    public function setRoleUsers(int|string $roleId, array $userIds): void
     {
         $stringIds = array_map('strval', $userIds);
 
@@ -157,7 +176,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     /**
      * @throws Throwable
      */
-    public function deleteRoleCache(int $roleId): void
+    public function deleteRoleCache(int|string $roleId): void
     {
         $this->connection()->command('del', [
             $this->rolePermissionsKey($roleId),
@@ -186,6 +205,122 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         } while ($cursor !== '0');
     }
 
+    /**
+     * @param array<string, string|null> $groups
+     *
+     * @throws Throwable
+     */
+    public function setPermissionGroups(array $groups): void
+    {
+        if ($groups === []) {
+            return;
+        }
+
+        $connection = $this->connection();
+        $key = $this->permissionGroupsKey();
+
+        $setValues = [];
+        $deleteFields = [];
+
+        foreach ($groups as $encodedName => $group) {
+            if ($group === null || $group === '') {
+                $deleteFields[] = $encodedName;
+            } else {
+                $setValues[$encodedName] = $group;
+            }
+        }
+
+        $connection->command('multi');
+
+        if ($setValues !== []) {
+            $connection->command('hmset', [$key, $setValues]);
+        }
+
+        if ($deleteFields !== []) {
+            $connection->command('hdel', [$key, ...$deleteFields]);
+        }
+
+        $result = $connection->command('exec');
+
+        if (!is_array($result)) {
+            throw TransactionFailedException::forKey($key);
+        }
+    }
+
+    /**
+     * @param array<string> $encodedNames
+     *
+     * @throws Throwable
+     *
+     * @return array<string, string|null>
+     */
+    public function getPermissionGroups(array $encodedNames): array
+    {
+        if ($encodedNames === []) {
+            return [];
+        }
+
+        $connection = $this->connection();
+        $key = $this->permissionGroupsKey();
+
+        /** @var array<int, string|null> $values */
+        $values = $connection->command('hmget', [$key, ...$encodedNames]);
+
+        $result = [];
+
+        foreach ($encodedNames as $index => $encodedName) {
+            $raw = $values[$index] ?? null;
+            $result[$encodedName] = is_string($raw) && $raw !== '' ? $raw : null;
+        }
+
+        return $result;
+    }
+
+    /**
+     * @throws Throwable
+     */
+    public function deletePermissionGroup(string $encodedName): void
+    {
+        $this->connection()->command('hdel', [$this->permissionGroupsKey(), $encodedName]);
+    }
+
+    /**
+     * @param array<string, array<string>> $sets
+     *
+     * @throws Throwable
+     */
+    public function replaceSetBatch(array $sets): void
+    {
+        if ($sets === []) {
+            return;
+        }
+
+        $ttl = $this->ttl();
+        $prefix = $this->prefix();
+        $connection = $this->connection();
+
+        $connection->command('multi');
+
+        foreach ($sets as $keySuffix => $members) {
+            $key = $prefix . $keySuffix;
+            $connection->command('del', [$key]);
+
+            if ($members !== []) {
+                $connection->command('sadd', [$key, ...$members]);
+            } else {
+                $connection->command('sadd', [$key, self::EMPTY_SENTINEL]);
+            }
+
+            $connection->command('expire', [$key, $ttl]);
+        }
+
+        $result = $connection->command('exec');
+
+        if (!is_array($result)) {
+            throw TransactionFailedException::forBatch(count($sets));
+        }
+    }
+
     /** @param array<string> $members
      * @throws Throwable
      */
@@ -200,11 +335,16 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         if ($members !== []) {
             $connection->command('sadd', [$key, ...$members]);
         } else {
-            $connection->command('sadd', [$key, '__empty__']);
+            $connection->command('sadd', [$key, self::EMPTY_SENTINEL]);
         }
 
         $connection->command('expire', [$key, $ttl]);
-        $connection->command('exec');
+
+        $result = $connection->command('exec');
+
+        if (!is_array($result)) {
+            throw TransactionFailedException::forKey($key);
+        }
     }
 
     private function userPermissionsKey(int|string $userId): string
@@ -217,14 +357,19 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         return $this->prefix() . "user:{$userId}:roles";
     }
 
-    private function rolePermissionsKey(int $roleId): string
+    private function rolePermissionsKey(int|string $roleId): string
     {
         return $this->prefix() . "role:{$roleId}:permissions";
     }
 
-    private function roleUsersKey(int $roleId): string
+    private function roleUsersKey(int|string $roleId): string
     {
         return $this->prefix() . "role:{$roleId}:users";
+    }
+
+    private function permissionGroupsKey(): string
+    {
+        return $this->prefix() . 'permission_groups';
     }
 
     private function connection(): Connection

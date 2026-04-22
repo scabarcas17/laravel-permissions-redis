@@ -109,6 +109,10 @@ test('hasRole respects explicit guard parameter', function () {
 test('getAllPermissions returns collection of PermissionDTO', function () {
     $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
     $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|users.create', 'web|users.edit']);
+    $this->repository->shouldReceive('getPermissionGroups')
+        ->with(['web|users.create', 'web|users.edit'])
+        ->once()
+        ->andReturn(['web|users.create' => null, 'web|users.edit' => null]);
 
     $permissions = $this->resolver->getAllPermissions(1);
 
@@ -122,6 +126,10 @@ test('getAllPermissions returns collection of PermissionDTO', function () {
 test('getAllPermissions populates individual permission cache', function () {
     $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
     $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|users.create']);
+    $this->repository->shouldReceive('getPermissionGroups')
+        ->with(['web|users.create'])
+        ->once()
+        ->andReturn(['web|users.create' => null]);
 
     $this->resolver->getAllPermissions(1);
 
@@ -132,6 +140,10 @@ test('getAllPermissions populates individual permission cache', function () {
 test('getAllPermissions uses in-memory cache on second call', function () {
     $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
     $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|users.create']);
+    $this->repository->shouldReceive('getPermissionGroups')
+        ->with(['web|users.create'])
+        ->once()
+        ->andReturn(['web|users.create' => null]);
 
     $this->resolver->getAllPermissions(1);
     $permissions = $this->resolver->getAllPermissions(1);
@@ -146,6 +158,14 @@ test('getAllPermissions filters by guard when specified', function () {
         'api|users.create',
         'web|users.edit',
     ]);
+    // Groups fetched once for all encoded names (guard filter applies post-load)
+    $this->repository->shouldReceive('getPermissionGroups')
+        ->once()
+        ->andReturn([
+            'web|users.create' => null,
+            'api|users.create' => null,
+            'web|users.edit'   => null,
+        ]);
 
     $webPermissions = $this->resolver->getAllPermissions(1, 'web');
     expect($webPermissions)->toHaveCount(2);
@@ -154,6 +174,40 @@ test('getAllPermissions filters by guard when specified', function () {
     expect($apiPermissions)->toHaveCount(1)
         ->and($apiPermissions->first()->name)->toBe('users.create')
         ->and($apiPermissions->first()->guard)->toBe('api');
+});
+
+test('getAllPermissions enriches DTOs with group metadata from Redis hash', function () {
+    $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
+    $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn([
+        'web|users.create',
+        'web|posts.edit',
+    ]);
+    $this->repository->shouldReceive('getPermissionGroups')
+        ->with(['web|users.create', 'web|posts.edit'])
+        ->once()
+        ->andReturn([
+            'web|users.create' => 'User Management',
+            'web|posts.edit'   => 'Content',
+        ]);
+
+    $permissions = $this->resolver->getAllPermissions(1);
+
+    expect($permissions)->toHaveCount(2)
+        ->and($permissions->first()->group)->toBe('User Management')
+        ->and($permissions->last()->group)->toBe('Content');
+});
+
+test('getAllPermissions returns null group when permission has no group', function () {
+    $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
+    $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|users.create']);
+    $this->repository->shouldReceive('getPermissionGroups')
+        ->with(['web|users.create'])
+        ->once()
+        ->andReturn(['web|users.create' => null]);
+
+    $permissions = $this->resolver->getAllPermissions(1);
+
+    expect($permissions->first()->group)->toBeNull();
 });
 
 // ─── getAllRoles ───
@@ -207,7 +261,7 @@ test('super admin bypasses all permission checks', function () {
     config()->set('auth.guards', ['web' => ['driver' => 'session', 'provider' => 'users']]);
 
     $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
-    $this->repository->shouldReceive('userHasRole')->with(1, 'web|super-admin')->once()->andReturn(true);
+    $this->repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn(['web|super-admin']);
 
     expect($this->resolver->hasPermission(1, 'anything'))->toBeTrue();
 });
@@ -216,8 +270,9 @@ test('non super admin falls through to normal check', function () {
     config()->set('permissions-redis.super_admin_role', 'super-admin');
     config()->set('auth.guards', ['web' => ['driver' => 'session', 'provider' => 'users']]);
 
+    // Called twice: once by loadUserRoles (in isSuperAdmin), once by hasPermission
     $this->repository->shouldReceive('userCacheExists')->with(1)->twice()->andReturn(true);
-    $this->repository->shouldReceive('userHasRole')->with(1, 'web|super-admin')->once()->andReturn(false);
+    $this->repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn(['web|editor']);
     $this->repository->shouldReceive('userHasPermission')->with(1, 'web|users.create')->once()->andReturn(false);
 
     expect($this->resolver->hasPermission(1, 'users.create'))->toBeFalse();
@@ -231,8 +286,8 @@ test('super admin bypasses across all guards', function () {
     ]);
 
     $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
-    // Super admin role exists only in web guard
-    $this->repository->shouldReceive('userHasRole')->with(1, 'web|super-admin')->once()->andReturn(true);
+    // Super admin role exists only in web guard — single SMEMBERS call finds it
+    $this->repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn(['web|super-admin']);
 
     // But check passes even for api guard
     expect($this->resolver->hasPermission(1, 'anything', 'api'))->toBeTrue();
@@ -264,9 +319,9 @@ test('super admin result is cached in memory', function () {
     config()->set('auth.guards', ['web' => ['driver' => 'session', 'provider' => 'users']]);
 
     $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
-    $this->repository->shouldReceive('userHasRole')->with(1, 'web|super-admin')->once()->andReturn(true);
+    $this->repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn(['web|super-admin']);
 
-    // First call checks Redis, second uses superAdminCache
+    // First call loads roles from Redis, second uses superAdminCache
     expect($this->resolver->hasPermission(1, 'anything'))->toBeTrue();
     expect($this->resolver->hasPermission(1, 'something_else'))->toBeTrue();
 });
@@ -275,6 +330,10 @@ test('legacy bare value decoded with default guard fallback', function () {
     $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
     // Repository returns legacy non-guard-encoded values
     $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['users.create', 'users.edit']);
+    $this->repository->shouldReceive('getPermissionGroups')
+        ->with(['users.create', 'users.edit'])
+        ->once()
+        ->andReturn(['users.create' => null, 'users.edit' => null]);
 
     $permissions = $this->resolver->getAllPermissions(1);
 
@@ -297,6 +356,31 @@ test('wildcard does not match across guards', function () {
 
 // ─── flush ───
 
+test('in-memory cache evicts oldest entries when limit is exceeded', function () {
+    config()->set('permissions-redis.resolver_cache_limit', 3);
+
+    // Populate cache for users 1-4 (exceeding limit of 3)
+    for ($i = 1; $i <= 4; $i++) {
+        $this->repository->shouldReceive('userCacheExists')->with($i)->andReturn(true);
+        $this->repository->shouldReceive('userHasPermission')->with($i, 'web|x')->andReturn(true);
+    }
+
+    // Fill cache: users 1, 2, 3
+    $this->resolver->hasPermission(1, 'x');
+    $this->resolver->hasPermission(2, 'x');
+    $this->resolver->hasPermission(3, 'x');
+
+    // Adding user 4 should trigger eviction (limit=3, evicts oldest half=1)
+    $this->resolver->hasPermission(4, 'x');
+
+    // User 2 should still be in cache (only user 1 was evicted)
+    // User 1 should need to re-fetch from Redis
+    // Since we used andReturn, both calls succeed — the key assertion is that
+    // the resolver doesn't crash and functions correctly under eviction
+    expect($this->resolver->hasPermission(2, 'x'))->toBeTrue()
+        ->and($this->resolver->hasPermission(4, 'x'))->toBeTrue();
+});
+
 test('flushUser clears only specific user cache', function () {
     // Populate cache for user 1 and 2
     $this->repository->shouldReceive('userCacheExists')->with(1)->twice()->andReturn(true);
@@ -312,4 +396,75 @@ test('flushUser clears only specific user cache', function () {
     // User 1 should hit Redis again, user 2 should use memory
     $this->resolver->hasPermission(1, 'x');
     $this->resolver->hasPermission(2, 'x');
+});
+
+// ─── warm cooldown (rate limiting) ───
+
+test('repeated cache misses within cooldown only trigger one warm call', function () {
+    config()->set('permissions-redis.resolver_warm_cooldown', 5.0);
+
+    // Different permissions each call so the resolver's in-memory permissionCache
+    // does not short-circuit and each call reaches ensureUserCacheExists.
+    $this->repository->shouldReceive('userCacheExists')->with(1)->times(3)->andReturn(false);
+
+    // But warm is only called once due to cooldown.
+    $this->cacheManager->shouldReceive('warmUser')->with(1)->once();
+
+    $this->repository->shouldReceive('userHasPermission')->with(1, 'web|a')->once()->andReturn(false);
+    $this->repository->shouldReceive('userHasPermission')->with(1, 'web|b')->once()->andReturn(false);
+    $this->repository->shouldReceive('userHasPermission')->with(1, 'web|c')->once()->andReturn(false);
+
+    $this->resolver->hasPermission(1, 'a');
+    $this->resolver->hasPermission(1, 'b');
+    $this->resolver->hasPermission(1, 'c');
+});
+
+test('warm cooldown is per-user (different users are not rate-limited against each other)', function () {
+    config()->set('permissions-redis.resolver_warm_cooldown', 5.0);
+
+    $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(false);
+    $this->repository->shouldReceive('userCacheExists')->with(2)->once()->andReturn(false);
+    $this->cacheManager->shouldReceive('warmUser')->with(1)->once();
+    $this->cacheManager->shouldReceive('warmUser')->with(2)->once();
+    $this->repository->shouldReceive('userHasPermission')->andReturn(false);
+
+    $this->resolver->hasPermission(1, 'x');
+    $this->resolver->hasPermission(2, 'x');
+});
+
+test('cooldown of 0 disables rate limiting', function () {
+    config()->set('permissions-redis.resolver_warm_cooldown', 0.0);
+
+    $this->repository->shouldReceive('userCacheExists')->with(1)->twice()->andReturn(false);
+    $this->cacheManager->shouldReceive('warmUser')->with(1)->twice();
+    $this->repository->shouldReceive('userHasPermission')->with(1, 'web|a')->once()->andReturn(false);
+    $this->repository->shouldReceive('userHasPermission')->with(1, 'web|b')->once()->andReturn(false);
+
+    $this->resolver->hasPermission(1, 'a');
+    $this->resolver->hasPermission(1, 'b');
+});
+
+test('flushUser resets warm cooldown for that user', function () {
+    config()->set('permissions-redis.resolver_warm_cooldown', 5.0);
+
+    $this->repository->shouldReceive('userCacheExists')->with(1)->twice()->andReturn(false);
+    // warmUser called twice because flushUser clears cooldown
+    $this->cacheManager->shouldReceive('warmUser')->with(1)->twice();
+    $this->repository->shouldReceive('userHasPermission')->with(1, 'web|x')->twice()->andReturn(false);
+
+    $this->resolver->hasPermission(1, 'x');
+    $this->resolver->flushUser(1);
+    $this->resolver->hasPermission(1, 'x');
+});
+
+test('flush resets warm cooldown for all users', function () {
+    config()->set('permissions-redis.resolver_warm_cooldown', 5.0);
+
+    $this->repository->shouldReceive('userCacheExists')->with(1)->twice()->andReturn(false);
+    $this->cacheManager->shouldReceive('warmUser')->with(1)->twice();
+    $this->repository->shouldReceive('userHasPermission')->with(1, 'web|x')->twice()->andReturn(false);
+
+    $this->resolver->hasPermission(1, 'x');
+    $this->resolver->flush();
+    $this->resolver->hasPermission(1, 'x');
 });

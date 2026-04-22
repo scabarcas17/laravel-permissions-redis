@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\AdminUser;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
@@ -120,14 +121,17 @@ test('warmAll processes all roles and users', function () {
         ->and($this->repo->getUserRoles($user2->id))->toContain('web|admin');
 });
 
-test('warmAll flushes before warming', function () {
+test('warmAll does not flush before warming to avoid downtime', function () {
     $data = seedDbData();
 
     $this->repo->setUserPermissions(999, ['stale.data']);
 
     $this->manager->warmAll();
 
-    expect($this->repo->getUserPermissions(999))->toBe([]);
+    // Stale data for orphan users persists (expires via TTL) — no downtime window
+    expect($this->repo->getUserPermissions(999))->toContain('stale.data')
+        // Active users are still warmed correctly
+        ->and($this->repo->getUserPermissions($data['user']->id))->toContain('web|users.create');
 });
 
 test('rewarmAll warms without flushing', function () {
@@ -224,4 +228,80 @@ test('evictRole removes role cache', function () {
     $this->manager->evictRole(1);
 
     expect($this->repo->getRoleUserIds(1))->toBe([]);
+});
+
+test('warmAll warms users from all configured user models', function () {
+    config()->set('permissions-redis.user_model', [User::class, AdminUser::class]);
+
+    $regularUser = User::create(['name' => 'John', 'email' => 'john@test.com']);
+    $adminUser = AdminUser::create(['name' => 'Root', 'email' => 'root@test.com']);
+
+    $roleId = DB::table('roles')->insertGetId(['name' => 'admin', 'guard_name' => 'web']);
+    $permId = DB::table('permissions')->insertGetId(['name' => 'posts.publish', 'guard_name' => 'web']);
+
+    DB::table('role_has_permissions')->insert(['role_id' => $roleId, 'permission_id' => $permId]);
+
+    DB::table('model_has_roles')->insert([
+        ['role_id' => $roleId, 'model_id' => $regularUser->id, 'model_type' => User::class],
+        ['role_id' => $roleId, 'model_id' => $adminUser->id, 'model_type' => AdminUser::class],
+    ]);
+
+    $this->manager->warmAll();
+
+    expect($this->repo->getUserPermissions($regularUser->id))->toContain('web|posts.publish')
+        ->and($this->repo->getUserPermissions($adminUser->id))->toContain('web|posts.publish');
+});
+
+test('warmPermissionGroups populates groups hash from permissions table', function () {
+    DB::table('permissions')->insert([
+        ['name' => 'users.create', 'guard_name' => 'web', 'group' => 'User Management'],
+        ['name' => 'posts.edit', 'guard_name' => 'web', 'group' => 'Content'],
+        ['name' => 'misc.ungrouped', 'guard_name' => 'web', 'group' => null],
+    ]);
+
+    $this->manager->warmPermissionGroups();
+
+    $groups = $this->repo->getPermissionGroups([
+        'web|users.create',
+        'web|posts.edit',
+        'web|misc.ungrouped',
+    ]);
+
+    expect($groups)->toBe([
+        'web|users.create'   => 'User Management',
+        'web|posts.edit'     => 'Content',
+        'web|misc.ungrouped' => null,
+    ]);
+});
+
+test('warmAll populates permission groups alongside users and roles', function () {
+    $data = seedDbData();
+
+    DB::table('permissions')
+        ->where('id', $data['permId'])
+        ->update(['group' => 'User Management']);
+
+    $this->manager->warmAll();
+
+    expect($this->repo->getPermissionGroups(['web|users.create']))
+        ->toBe(['web|users.create' => 'User Management']);
+});
+
+test('getUserIdsAffectedByPermission includes users from all configured models', function () {
+    config()->set('permissions-redis.user_model', [User::class, AdminUser::class]);
+
+    $regularUser = User::create(['name' => 'John', 'email' => 'john@test.com']);
+    $adminUser = AdminUser::create(['name' => 'Root', 'email' => 'root@test.com']);
+
+    $permId = DB::table('permissions')->insertGetId(['name' => 'direct.perm', 'guard_name' => 'web']);
+
+    DB::table('model_has_permissions')->insert([
+        ['permission_id' => $permId, 'model_id' => $regularUser->id, 'model_type' => User::class],
+        ['permission_id' => $permId, 'model_id' => $adminUser->id, 'model_type' => AdminUser::class],
+    ]);
+
+    $affected = $this->manager->getUserIdsAffectedByPermission($permId);
+
+    expect($affected)->toContain($regularUser->id)
+        ->and($affected)->toContain($adminUser->id);
 });

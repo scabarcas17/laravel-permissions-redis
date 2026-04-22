@@ -54,11 +54,11 @@ test('userHasRole returns false when SISMEMBER returns 0', function () {
 
 // ─── getUserPermissions ───
 
-test('getUserPermissions returns members excluding __empty__ sentinel', function () {
+test('getUserPermissions returns members excluding empty sentinel', function () {
     $this->connection->shouldReceive('command')
         ->with('smembers', ['auth:user:1:permissions'])
         ->once()
-        ->andReturn(['web|users.create', 'web|users.edit', '__empty__']);
+        ->andReturn(['web|users.create', 'web|users.edit', RedisPermissionRepository::EMPTY_SENTINEL]);
 
     $result = $this->repository->getUserPermissions(1);
 
@@ -76,11 +76,11 @@ test('getUserPermissions returns empty array when Redis returns null', function 
 
 // ─── getUserRoles ───
 
-test('getUserRoles returns members excluding __empty__ sentinel', function () {
+test('getUserRoles returns members excluding empty sentinel', function () {
     $this->connection->shouldReceive('command')
         ->with('smembers', ['auth:user:1:roles'])
         ->once()
-        ->andReturn(['web|admin', '__empty__']);
+        ->andReturn(['web|admin', RedisPermissionRepository::EMPTY_SENTINEL]);
 
     expect($this->repository->getUserRoles(1))->toBe(['web|admin']);
 });
@@ -96,11 +96,11 @@ test('getUserRoles returns empty array when Redis returns null', function () {
 
 // ─── getRoleUserIds ───
 
-test('getRoleUserIds returns integer user IDs excluding __empty__', function () {
+test('getRoleUserIds returns integer user IDs excluding empty sentinel', function () {
     $this->connection->shouldReceive('command')
         ->with('smembers', ['auth:role:5:users'])
         ->once()
-        ->andReturn(['1', '2', '3', '__empty__']);
+        ->andReturn(['1', '2', '3', RedisPermissionRepository::EMPTY_SENTINEL]);
 
     expect($this->repository->getRoleUserIds(5))->toBe([1, 2, 3]);
 });
@@ -121,17 +121,17 @@ test('setUserPermissions replaces set with MULTI/EXEC transaction', function () 
     $this->connection->shouldReceive('command')->with('del', ['auth:user:1:permissions'])->once();
     $this->connection->shouldReceive('command')->with('sadd', ['auth:user:1:permissions', 'web|users.create', 'web|users.edit'])->once();
     $this->connection->shouldReceive('command')->with('expire', ['auth:user:1:permissions', 86400])->once();
-    $this->connection->shouldReceive('command')->with('exec')->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1, 1, 1]);
 
     $this->repository->setUserPermissions(1, ['web|users.create', 'web|users.edit']);
 });
 
-test('setUserPermissions uses __empty__ sentinel for empty array', function () {
+test('setUserPermissions uses empty sentinel for empty array', function () {
     $this->connection->shouldReceive('command')->with('multi')->once();
     $this->connection->shouldReceive('command')->with('del', ['auth:user:1:permissions'])->once();
-    $this->connection->shouldReceive('command')->with('sadd', ['auth:user:1:permissions', '__empty__'])->once();
+    $this->connection->shouldReceive('command')->with('sadd', ['auth:user:1:permissions', RedisPermissionRepository::EMPTY_SENTINEL])->once();
     $this->connection->shouldReceive('command')->with('expire', ['auth:user:1:permissions', 86400])->once();
-    $this->connection->shouldReceive('command')->with('exec')->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1, 1, 1]);
 
     $this->repository->setUserPermissions(1, []);
 });
@@ -143,7 +143,7 @@ test('setUserRoles replaces set with MULTI/EXEC transaction', function () {
     $this->connection->shouldReceive('command')->with('del', ['auth:user:1:roles'])->once();
     $this->connection->shouldReceive('command')->with('sadd', ['auth:user:1:roles', 'web|admin'])->once();
     $this->connection->shouldReceive('command')->with('expire', ['auth:user:1:roles', 86400])->once();
-    $this->connection->shouldReceive('command')->with('exec')->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1, 1, 1]);
 
     $this->repository->setUserRoles(1, ['web|admin']);
 });
@@ -155,7 +155,7 @@ test('setRolePermissions replaces set with MULTI/EXEC transaction', function () 
     $this->connection->shouldReceive('command')->with('del', ['auth:role:5:permissions'])->once();
     $this->connection->shouldReceive('command')->with('sadd', ['auth:role:5:permissions', 'web|users.create'])->once();
     $this->connection->shouldReceive('command')->with('expire', ['auth:role:5:permissions', 86400])->once();
-    $this->connection->shouldReceive('command')->with('exec')->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1, 1, 1]);
 
     $this->repository->setRolePermissions(5, ['web|users.create']);
 });
@@ -167,7 +167,7 @@ test('setRoleUsers converts integer IDs to strings', function () {
     $this->connection->shouldReceive('command')->with('del', ['auth:role:5:users'])->once();
     $this->connection->shouldReceive('command')->with('sadd', ['auth:role:5:users', '1', '2'])->once();
     $this->connection->shouldReceive('command')->with('expire', ['auth:role:5:users', 86400])->once();
-    $this->connection->shouldReceive('command')->with('exec')->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1, 1, 1]);
 
     $this->repository->setRoleUsers(5, [1, 2]);
 });
@@ -266,7 +266,164 @@ test('uses configured TTL for expiry', function () {
     $this->connection->shouldReceive('command')->with('del', Mockery::any())->once();
     $this->connection->shouldReceive('command')->with('sadd', Mockery::any())->once();
     $this->connection->shouldReceive('command')->with('expire', ['auth:user:1:permissions', 3600])->once();
-    $this->connection->shouldReceive('command')->with('exec')->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1, 1, 1]);
 
     $this->repository->setUserPermissions(1, ['web|test']);
+});
+
+// ─── EXEC validation ───
+
+test('setUserPermissions throws TransactionFailedException when EXEC returns null', function () {
+    $this->connection->shouldReceive('command')->with('multi')->once();
+    $this->connection->shouldReceive('command')->with('del', Mockery::any())->once();
+    $this->connection->shouldReceive('command')->with('sadd', Mockery::any())->once();
+    $this->connection->shouldReceive('command')->with('expire', Mockery::any())->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn(null);
+
+    expect(fn () => $this->repository->setUserPermissions(1, ['web|test']))
+        ->toThrow(\Scabarcas\LaravelPermissionsRedis\Exceptions\TransactionFailedException::class);
+});
+
+test('setUserPermissions throws TransactionFailedException when EXEC returns false', function () {
+    $this->connection->shouldReceive('command')->with('multi')->once();
+    $this->connection->shouldReceive('command')->with('del', Mockery::any())->once();
+    $this->connection->shouldReceive('command')->with('sadd', Mockery::any())->once();
+    $this->connection->shouldReceive('command')->with('expire', Mockery::any())->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn(false);
+
+    expect(fn () => $this->repository->setUserPermissions(1, ['web|test']))
+        ->toThrow(\Scabarcas\LaravelPermissionsRedis\Exceptions\TransactionFailedException::class);
+});
+
+test('replaceSetBatch throws TransactionFailedException when EXEC returns null', function () {
+    $this->connection->shouldReceive('command')->with('multi')->once();
+    $this->connection->shouldReceive('command')->with('del', Mockery::any())->zeroOrMoreTimes();
+    $this->connection->shouldReceive('command')->with('sadd', Mockery::any())->zeroOrMoreTimes();
+    $this->connection->shouldReceive('command')->with('expire', Mockery::any())->zeroOrMoreTimes();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn(null);
+
+    expect(fn () => $this->repository->replaceSetBatch(['user:1:permissions' => ['web|x']]))
+        ->toThrow(\Scabarcas\LaravelPermissionsRedis\Exceptions\TransactionFailedException::class);
+});
+
+test('replaceSetBatch succeeds when EXEC returns an array', function () {
+    $this->connection->shouldReceive('command')->with('multi')->once();
+    $this->connection->shouldReceive('command')->with('del', ['auth:user:1:permissions'])->once();
+    $this->connection->shouldReceive('command')->with('sadd', ['auth:user:1:permissions', 'web|users.create'])->once();
+    $this->connection->shouldReceive('command')->with('expire', ['auth:user:1:permissions', 86400])->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1, 1, 1]);
+
+    $this->repository->replaceSetBatch(['user:1:permissions' => ['web|users.create']]);
+});
+
+test('replaceSetBatch uses empty sentinel for empty member arrays', function () {
+    $this->connection->shouldReceive('command')->with('multi')->once();
+    $this->connection->shouldReceive('command')->with('del', ['auth:user:1:permissions'])->once();
+    $this->connection->shouldReceive('command')->with('sadd', ['auth:user:1:permissions', RedisPermissionRepository::EMPTY_SENTINEL])->once();
+    $this->connection->shouldReceive('command')->with('expire', ['auth:user:1:permissions', 86400])->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1, 1, 1]);
+
+    $this->repository->replaceSetBatch(['user:1:permissions' => []]);
+});
+
+test('replaceSetBatch returns early when sets is empty', function () {
+    $this->connection->shouldNotReceive('command');
+
+    $this->repository->replaceSetBatch([]);
+});
+
+// ─── Permission groups ───
+
+test('setPermissionGroups stores non-null groups via HMSET', function () {
+    $this->connection->shouldReceive('command')->with('multi')->once();
+    $this->connection->shouldReceive('command')
+        ->with('hmset', ['auth:permission_groups', [
+            'web|users.create' => 'User Management',
+            'web|posts.edit'   => 'Content',
+        ]])
+        ->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1]);
+
+    $this->repository->setPermissionGroups([
+        'web|users.create' => 'User Management',
+        'web|posts.edit'   => 'Content',
+    ]);
+});
+
+test('setPermissionGroups deletes fields with null group value via HDEL', function () {
+    $this->connection->shouldReceive('command')->with('multi')->once();
+    $this->connection->shouldReceive('command')
+        ->with('hdel', ['auth:permission_groups', 'web|users.create'])
+        ->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1]);
+
+    $this->repository->setPermissionGroups(['web|users.create' => null]);
+});
+
+test('setPermissionGroups combines HMSET and HDEL in a single transaction', function () {
+    $this->connection->shouldReceive('command')->with('multi')->once();
+    $this->connection->shouldReceive('command')
+        ->with('hmset', ['auth:permission_groups', ['web|posts.edit' => 'Content']])
+        ->once();
+    $this->connection->shouldReceive('command')
+        ->with('hdel', ['auth:permission_groups', 'web|users.create'])
+        ->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1, 1]);
+
+    $this->repository->setPermissionGroups([
+        'web|posts.edit'   => 'Content',
+        'web|users.create' => null,
+    ]);
+});
+
+test('setPermissionGroups throws TransactionFailedException when EXEC returns false', function () {
+    $this->connection->shouldReceive('command')->with('multi')->once();
+    $this->connection->shouldReceive('command')->with('hmset', Mockery::any())->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn(false);
+
+    expect(fn () => $this->repository->setPermissionGroups(['web|x' => 'G']))
+        ->toThrow(\Scabarcas\LaravelPermissionsRedis\Exceptions\TransactionFailedException::class);
+});
+
+test('setPermissionGroups returns early when groups is empty', function () {
+    $this->connection->shouldNotReceive('command');
+
+    $this->repository->setPermissionGroups([]);
+});
+
+test('getPermissionGroups fetches via HMGET and maps nulls', function () {
+    $this->connection->shouldReceive('command')
+        ->with('hmget', ['auth:permission_groups', 'web|users.create', 'web|posts.edit'])
+        ->once()
+        ->andReturn(['User Management', null]);
+
+    $result = $this->repository->getPermissionGroups(['web|users.create', 'web|posts.edit']);
+
+    expect($result)->toBe([
+        'web|users.create' => 'User Management',
+        'web|posts.edit'   => null,
+    ]);
+});
+
+test('getPermissionGroups returns empty array for empty input', function () {
+    $this->connection->shouldNotReceive('command');
+
+    expect($this->repository->getPermissionGroups([]))->toBe([]);
+});
+
+test('getPermissionGroups treats empty string as null', function () {
+    $this->connection->shouldReceive('command')
+        ->with('hmget', ['auth:permission_groups', 'web|x'])
+        ->once()
+        ->andReturn(['']);
+
+    expect($this->repository->getPermissionGroups(['web|x']))->toBe(['web|x' => null]);
+});
+
+test('deletePermissionGroup removes single field via HDEL', function () {
+    $this->connection->shouldReceive('command')
+        ->with('hdel', ['auth:permission_groups', 'web|users.create'])
+        ->once();
+
+    $this->repository->deletePermissionGroup('web|users.create');
 });

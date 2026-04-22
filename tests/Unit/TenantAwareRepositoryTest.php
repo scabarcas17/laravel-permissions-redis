@@ -118,6 +118,19 @@ test('null tenant resolver uses raw user ID without prefix', function () {
     expect($repo->userHasPermission(1, 'web|posts.create'))->toBeTrue();
 });
 
+test('flushAll with null tenant delegates to inner flushAll', function () {
+    $inner = new InMemoryPermissionRepository();
+    $repo = createTenantRepo($inner, null);
+
+    $repo->setUserPermissions(1, ['web|posts.create']);
+    $repo->setUserRoles(1, ['web|admin']);
+
+    $repo->flushAll();
+
+    expect($inner->getUserPermissions('1'))->toBe([])
+        ->and($inner->getUserRoles('1'))->toBe([]);
+});
+
 // ─── UUID user IDs with tenancy ───
 
 test('tenant isolation works with UUID user IDs', function () {
@@ -140,6 +153,66 @@ test('tenant isolation works with UUID user IDs', function () {
 
 // ─── Integer tenant IDs ───
 
+// ─── Role operations are tenant-scoped ───
+
+test('setRolePermissions and getRoleUserIds are tenant-scoped', function () {
+    $inner = new InMemoryPermissionRepository();
+
+    $tenant1Repo = createTenantRepo($inner, 'tenant-1');
+    $tenant2Repo = createTenantRepo($inner, 'tenant-2');
+
+    $tenant1Repo->setRolePermissions(1, ['web|posts.create']);
+    $tenant2Repo->setRolePermissions(1, ['web|users.manage']);
+
+    // Verify via inner: keys should be different
+    expect($inner->getRoleUserIds('t:tenant-1:1'))->toBe([])
+        ->and($inner->getRoleUserIds('t:tenant-2:1'))->toBe([]);
+});
+
+test('setRoleUsers is tenant-scoped', function () {
+    $inner = new InMemoryPermissionRepository();
+
+    $tenant1Repo = createTenantRepo($inner, 'tenant-1');
+    $tenant2Repo = createTenantRepo($inner, 'tenant-2');
+
+    $tenant1Repo->setRoleUsers(1, [10, 20]);
+    $tenant2Repo->setRoleUsers(1, [30, 40]);
+
+    // Each tenant's role should have different users
+    expect($inner->getRoleUserIds('t:tenant-1:1'))->toBe([10, 20])
+        ->and($inner->getRoleUserIds('t:tenant-2:1'))->toBe([30, 40]);
+});
+
+test('deleteRoleCache only affects current tenant', function () {
+    $inner = new InMemoryPermissionRepository();
+
+    $tenant1Repo = createTenantRepo($inner, 'tenant-1');
+    $tenant2Repo = createTenantRepo($inner, 'tenant-2');
+
+    $tenant1Repo->setRoleUsers(1, [10]);
+    $tenant2Repo->setRoleUsers(1, [20]);
+
+    $tenant1Repo->deleteRoleCache(1);
+
+    expect($inner->getRoleUserIds('t:tenant-1:1'))->toBe([])
+        ->and($inner->getRoleUserIds('t:tenant-2:1'))->toBe([20]);
+});
+
+test('getRoleUserIds is tenant-scoped', function () {
+    $inner = new InMemoryPermissionRepository();
+
+    $tenant1Repo = createTenantRepo($inner, 'tenant-1');
+    $tenant2Repo = createTenantRepo($inner, 'tenant-2');
+
+    $tenant1Repo->setRoleUsers(1, [10, 20]);
+    $tenant2Repo->setRoleUsers(1, [30]);
+
+    expect($tenant1Repo->getRoleUserIds(1))->toBe([10, 20])
+        ->and($tenant2Repo->getRoleUserIds(1))->toBe([30]);
+});
+
+// ─── Integer tenant IDs ───
+
 test('integer tenant IDs work correctly', function () {
     $inner = new InMemoryPermissionRepository();
 
@@ -151,4 +224,34 @@ test('integer tenant IDs work correctly', function () {
 
     expect($tenant1Repo->getUserPermissions(1))->toBe(['web|posts.create']);
     expect($tenant2Repo->getUserPermissions(1))->toBe(['web|posts.edit']);
+});
+
+// ─── Permission groups (global, NOT tenant-scoped) ───
+
+test('permission groups are shared across tenants (not tenant-scoped)', function () {
+    $inner = new InMemoryPermissionRepository();
+
+    $tenant1Repo = createTenantRepo($inner, 'tenant-1');
+    $tenant2Repo = createTenantRepo($inner, 'tenant-2');
+
+    $tenant1Repo->setPermissionGroups(['web|users.create' => 'User Management']);
+
+    // Both tenants see the same group metadata (permissions table is global)
+    expect($tenant1Repo->getPermissionGroups(['web|users.create']))
+        ->toBe(['web|users.create' => 'User Management']);
+    expect($tenant2Repo->getPermissionGroups(['web|users.create']))
+        ->toBe(['web|users.create' => 'User Management']);
+});
+
+test('deletePermissionGroup removes group from all tenants', function () {
+    $inner = new InMemoryPermissionRepository();
+
+    $tenant1Repo = createTenantRepo($inner, 'tenant-1');
+    $tenant2Repo = createTenantRepo($inner, 'tenant-2');
+
+    $tenant1Repo->setPermissionGroups(['web|users.create' => 'User Management']);
+    $tenant2Repo->deletePermissionGroup('web|users.create');
+
+    expect($tenant1Repo->getPermissionGroups(['web|users.create']))
+        ->toBe(['web|users.create' => null]);
 });

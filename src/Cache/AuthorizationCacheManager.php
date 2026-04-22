@@ -22,10 +22,9 @@ class AuthorizationCacheManager
 
     public function warmAll(): void
     {
-        $this->repository->flushAll();
-
         $this->warmAllRoles();
         $this->warmAllUsers();
+        $this->warmPermissionGroups();
 
         $this->log('Full authorization cache warm completed.');
     }
@@ -34,8 +33,41 @@ class AuthorizationCacheManager
     {
         $this->warmAllRoles();
         $this->warmAllUsers();
+        $this->warmPermissionGroups();
 
         $this->log('Cache rewarm completed (no flush).');
+    }
+
+    /**
+     * Populate the permission_groups hash from the permissions table. Keys are
+     * encoded as "{guard}|{name}" (matching the encoding used by set members).
+     */
+    public function warmPermissionGroups(): void
+    {
+        $batch = [];
+
+        DB::table($this->table('permissions'))
+            ->select('guard_name', 'name', 'group')
+            ->orderBy('id')
+            ->chunk(500, function (Collection $permissions) use (&$batch): void {
+                foreach ($permissions as $permission) {
+                    $guard = is_string($permission->guard_name) ? $permission->guard_name : '';
+                    $name = is_string($permission->name) ? $permission->name : '';
+                    $group = is_string($permission->group) && $permission->group !== '' ? $permission->group : null;
+
+                    if ($group === null) {
+                        continue;
+                    }
+
+                    $batch["{$guard}|{$name}"] = $group;
+                }
+            });
+
+        if ($batch === []) {
+            return;
+        }
+
+        $this->repository->setPermissionGroups($batch);
     }
 
     public function warmUser(int|string $userId): void
@@ -82,11 +114,11 @@ class AuthorizationCacheManager
     /** @return array<int|string> */
     public function getUserIdsAffectedByPermission(int $permissionId): array
     {
-        $modelType = $this->userModelType();
+        $modelTypes = $this->userModelTypes();
 
         $directUserIds = DB::table($this->table('model_has_permissions'))
             ->where('permission_id', $permissionId)
-            ->where('model_type', $modelType)
+            ->whereIn('model_type', $modelTypes)
             ->pluck('model_id');
 
         $roleIds = DB::table($this->table('role_has_permissions'))
@@ -96,7 +128,7 @@ class AuthorizationCacheManager
         $roleUserIds = $roleIds->isNotEmpty()
             ? DB::table($this->table('model_has_roles'))
                 ->whereIn('role_id', $roleIds)
-                ->where('model_type', $modelType)
+                ->whereIn('model_type', $modelTypes)
                 ->pluck('model_id')
             : collect();
 
@@ -133,7 +165,7 @@ class AuthorizationCacheManager
                     $this->table('role_has_permissions') . '.permission_id'
                 )
                 ->where($this->table('model_has_roles') . '.model_id', $userId)
-                ->where($this->table('model_has_roles') . '.model_type', $this->userModelType())
+                ->whereIn($this->table('model_has_roles') . '.model_type', $this->userModelTypes())
                 ->select($permissionsTable . '.guard_name', $permissionsTable . '.name')
                 ->cursor()
         );
@@ -153,7 +185,7 @@ class AuthorizationCacheManager
                     $this->table('model_has_permissions') . '.permission_id'
                 )
                 ->where($this->table('model_has_permissions') . '.model_id', $userId)
-                ->where($this->table('model_has_permissions') . '.model_type', $this->userModelType())
+                ->whereIn($this->table('model_has_permissions') . '.model_type', $this->userModelTypes())
                 ->select($permissionsTable . '.guard_name', $permissionsTable . '.name')
                 ->cursor()
         );
@@ -173,7 +205,7 @@ class AuthorizationCacheManager
                     $this->table('model_has_roles') . '.role_id'
                 )
                 ->where($this->table('model_has_roles') . '.model_id', $userId)
-                ->where($this->table('model_has_roles') . '.model_type', $this->userModelType())
+                ->whereIn($this->table('model_has_roles') . '.model_type', $this->userModelTypes())
                 ->select($rolesTable . '.guard_name', $rolesTable . '.name')
                 ->cursor()
         );
@@ -206,7 +238,7 @@ class AuthorizationCacheManager
         /** @var array<int|string> */
         return DB::table($this->table('model_has_roles'))
             ->where('role_id', $roleId)
-            ->where('model_type', $this->userModelType())
+            ->whereIn('model_type', $this->userModelTypes())
             ->pluck('model_id')
             ->all();
     }
@@ -214,43 +246,68 @@ class AuthorizationCacheManager
     private function warmAllRoles(): void
     {
         DB::table($this->table('roles'))->orderBy('id')->chunk(200, function (Collection $roles): void {
+            $batch = [];
+
             foreach ($roles as $role) {
                 /** @var int $roleId */
                 $roleId = $role->id;
-                $this->warmRole($roleId);
+
+                $permissions = $this->getRolePermissionNames($roleId);
+                $userIds = $this->getRoleUserIdsFromDb($roleId);
+
+                $batch["role:{$roleId}:permissions"] = $permissions;
+                $batch["role:{$roleId}:users"] = array_map('strval', $userIds);
             }
+
+            $this->repository->replaceSetBatch($batch);
         });
     }
 
     private function warmAllUsers(): void
     {
-        $modelType = $this->userModelType();
+        $modelTypes = $this->userModelTypes();
 
         $userIds = DB::table($this->table('model_has_roles'))
-            ->where('model_type', $modelType)
+            ->whereIn('model_type', $modelTypes)
             ->select('model_id')
             ->union(
                 DB::table($this->table('model_has_permissions'))
-                    ->where('model_type', $modelType)
+                    ->whereIn('model_type', $modelTypes)
                     ->select('model_id')
             )
             ->distinct()
             ->pluck('model_id');
 
         $userIds->chunk(200)->each(function (Collection $chunk): void {
+            $batch = [];
+
             foreach ($chunk as $userId) {
                 /** @var int|string $userId */
-                $this->warmUser($userId);
+                $permissions = $this->computeUserPermissions($userId);
+                $roles = $this->getUserRoleNames($userId);
+
+                $batch["user:{$userId}:permissions"] = $permissions;
+                $batch["user:{$userId}:roles"] = $roles;
             }
+
+            $this->repository->replaceSetBatch($batch);
         });
     }
 
-    private function userModelType(): string
+    /**
+     * @return array<string>
+     */
+    private function userModelTypes(): array
     {
-        /** @var string $model */
         $model = config('permissions-redis.user_model', 'App\\Models\\User');
 
-        return $model;
+        if (is_array($model)) {
+            /** @var array<string> $model */
+            return array_values($model);
+        }
+
+        /** @var string $model */
+        return [$model];
     }
 
     private function table(string $key): string

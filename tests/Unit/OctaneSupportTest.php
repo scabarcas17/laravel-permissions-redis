@@ -49,11 +49,19 @@ test('flush clears allPermissions cache', function () {
 
     $repository->shouldReceive('userCacheExists')->with(1)->andReturn(true);
     $repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|posts.create']);
+    $repository->shouldReceive('getPermissionGroups')
+        ->with(['web|posts.create'])
+        ->once()
+        ->andReturn(['web|posts.create' => null]);
     $resolver->getAllPermissions(1);
 
     $resolver->flush();
 
     $repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|posts.create', 'web|posts.edit']);
+    $repository->shouldReceive('getPermissionGroups')
+        ->with(['web|posts.create', 'web|posts.edit'])
+        ->once()
+        ->andReturn(['web|posts.create' => null, 'web|posts.edit' => null]);
     $permissions = $resolver->getAllPermissions(1);
     expect($permissions)->toHaveCount(2);
 });

@@ -8,6 +8,7 @@ use BackedEnum;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use InvalidArgumentException;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
 use Scabarcas\LaravelPermissionsRedis\Events\RoleDeleted;
 
@@ -103,6 +104,22 @@ class Role extends Model
         event(new PermissionsSynced($this));
 
         return $this;
+    }
+
+    /**
+     * Check whether this role grants the given permission. Uses the Redis-cached
+     * role permission set (SISMEMBER) rather than a DB query.
+     */
+    public function hasPermission(string|BackedEnum $permission, ?string $guard = null): bool
+    {
+        $name = $permission instanceof BackedEnum ? (string) $permission->value : $permission;
+        $guardName = $guard ?? $this->guard_name;
+        $encoded = "{$guardName}|{$name}";
+
+        /** @var PermissionRepositoryInterface $repository */
+        $repository = app(PermissionRepositoryInterface::class);
+
+        return $repository->roleHasPermission($this->id, $encoded);
     }
 
     protected static function booted(): void

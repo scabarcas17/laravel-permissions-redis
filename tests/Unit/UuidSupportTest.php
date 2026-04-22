@@ -44,6 +44,10 @@ test('getAllPermissions works with UUID string user ID', function () {
 
     $repository->shouldReceive('userCacheExists')->with($uuid)->once()->andReturn(true);
     $repository->shouldReceive('getUserPermissions')->with($uuid)->once()->andReturn(['web|posts.create', 'web|posts.edit']);
+    $repository->shouldReceive('getPermissionGroups')
+        ->with(['web|posts.create', 'web|posts.edit'])
+        ->once()
+        ->andReturn(['web|posts.create' => null, 'web|posts.edit' => null]);
 
     $permissions = $resolver->getAllPermissions($uuid);
 

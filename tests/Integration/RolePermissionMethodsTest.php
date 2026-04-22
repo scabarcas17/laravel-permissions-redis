@@ -3,9 +3,11 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Event;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
 use Scabarcas\LaravelPermissionsRedis\Models\Permission;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
+use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\TestPermissionEnum;
 
 test('Role syncPermissions replaces all permissions and dispatches event', function () {
@@ -93,4 +95,40 @@ test('Role givePermissionTo returns self for fluent chaining', function () {
     $result = $role->givePermissionTo('users.create');
 
     expect($result)->toBe($role);
+});
+
+test('Role hasPermission reads from Redis role permission set', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+
+    $role = Role::create(['name' => 'admin', 'guard_name' => 'web']);
+
+    $repo->setRolePermissions($role->id, ['web|users.create']);
+
+    expect($role->hasPermission('users.create'))->toBeTrue()
+        ->and($role->hasPermission('users.delete'))->toBeFalse();
+});
+
+test('Role hasPermission uses role guard_name by default', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+
+    $role = Role::create(['name' => 'admin', 'guard_name' => 'api']);
+
+    $repo->setRolePermissions($role->id, ['api|tokens.issue']);
+
+    expect($role->hasPermission('tokens.issue'))->toBeTrue()
+        // Same name under a different guard does not match
+        ->and($role->hasPermission('tokens.issue', 'web'))->toBeFalse();
+});
+
+test('Role hasPermission accepts a BackedEnum permission', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+
+    $role = Role::create(['name' => 'admin', 'guard_name' => 'web']);
+
+    $repo->setRolePermissions($role->id, ['web|users.create']);
+
+    expect($role->hasPermission(TestPermissionEnum::Create))->toBeTrue();
 });
