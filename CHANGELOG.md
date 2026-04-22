@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0-beta.1] - 2026-04-22
+
+### Breaking Changes
+
+- **`PermissionRepositoryInterface`** — Three new methods added for permission group metadata. Any custom implementation of the interface must implement them:
+  - `setPermissionGroups(array $groups): void`
+  - `getPermissionGroups(array $encodedNames): array`
+  - `deletePermissionGroup(string $encodedName): void`
+- **Post-upgrade step required** — After upgrading, run `php artisan permissions-redis:warm --fresh` (or `rewarm`) to populate the new `auth:permission_groups` Redis hash. Until the hash is populated, `getAllPermissions()` will return DTOs with `group: null`.
+
+### Added
+
+- **Permission `group` metadata preserved in Redis** — A new Redis hash (`{prefix}permission_groups`) stores `{guard}|{name}` → `group` mappings. `PermissionResolver::getAllPermissions()` now enriches `PermissionDTO` with the correct group name. Groups are global (not tenant-scoped) because they live in the shared `permissions` table.
+- **`Role::hasPermission(string $permission, ?string $guard = null): bool`** — Check whether a specific role has a permission via Redis (SISMEMBER on the `role:{id}:permissions` set).
+- **Guard parameter on Blade directives** — All six directives (`@role`, `@hasanyrole`, `@hasallroles`, `@permission`, `@hasanypermission`, `@hasallpermissions`) now accept an optional second argument for guard override: `@role('admin', 'api')`.
+- **`PermissionsAssigned` event** — Dispatched when `givePermissionTo`, `revokePermissionTo`, or `syncPermissions` is called directly on a user. Subscribed by `CacheInvalidator` to trigger rewarming.
+- **`DispatchesPermissionEvents` trait** — Opt-in trait for User models that automatically dispatches `UserDeleted` on model deletion. Documented usage replaces manual observer registration.
+- **Multiple user models supported** — `user_model` config now accepts an array: `['App\Models\User', 'App\Models\Admin']`. `AuthorizationCacheManager` and the `Gate::before` callback iterate over all configured types.
+- **Queue-backed cache warming** — `WarmUserCacheJob` plus `--queue` flag on `permissions-redis:warm` and `permissions-redis:warm-user` commands. Pushes warm operations to the default queue instead of running them synchronously.
+- **Guard configuration per seed entry** — `config/permissions-redis.php` `seed` structure now supports `['guard' => 'api']` on roles and permissions. `permissions-redis:seed` also accepts `--guard` as a global override.
+- **LRU eviction in `PermissionResolver`** — In-memory resolver caches (`permissionCache`, `roleCache`, etc.) now evict the oldest half once they exceed `resolver_cache_limit` (default `1000`). Prevents unbounded growth in long-running workers.
+- **Warm cooldown / rate limiting** — `ensureUserCacheExists` tracks the last warm attempt per user in `warmAttempts` and skips re-warming for `resolver_warm_cooldown` seconds (default `1.0s`). Protects the database from storms if Redis cache creation repeatedly fails.
+- **`TransactionFailedException`** — Thrown when Redis `EXEC` returns `null` or `false`, making transaction failures observable instead of silently dropping writes.
+- **`AuthorizationCacheManager::rewarmAll()`** — Non-destructive rewarm that writes the new cache before evicting stale keys, eliminating the downtime window present in the old `warmAll()` flow.
+- **`RedisPermissionRepository::replaceSetBatch(array $sets): void`** — Pipeline-backed batch method for bulk warming. Used internally by `rewarmAll` to reduce round-trips during bulk operations.
+- **`isSuperAdmin` single-call optimization** — Replaces per-guard `SISMEMBER` probes with one `SMEMBERS` followed by in-memory decoding.
+- **Role ID cache in `HasRedisPermissions::hasRole`** — Numeric role IDs are resolved via a static map (`int → name`) instead of one SQL query per check.
+
+### Changed
+
+- **`CacheStatsCommand` regex** — Now matches non-numeric user IDs (UUIDs, ULIDs). Previous `/^user:(\d+):permissions$/` pattern silently excluded them from stats.
+- **`SeedCommand` guard handling** — No longer hardcoded to `'web'`. Reads from config per-entry, accepts `--guard=api`, or falls back to the application default guard.
+- **`MigrateFromSpatieCommand::ensureTargetTablesExist`** — Returns `bool`; `handle()` halts when it returns `false` instead of proceeding with `copyData()` and producing partial migrations.
+- **`TenantAwareRedisPermissionRepository`** — All role-related operations (`setRolePermissions`, `setRoleUsers`, `getRoleUserIds`, `deleteRoleCache`) now apply the tenant prefix. Previously, role data was shared across tenants. `flushAll()` is scoped to the current tenant (`SCAN` with `t:{tenantId}:*`).
+- **`PermissionResolver::isSuperAdmin`** — Iterates `loadUserRoles()` once instead of calling `userHasRole` per configured guard.
+- **Empty SET sentinel** — The legacy `'__empty__'` marker is replaced by a reserved prefix (`"\x00empty\x00"`) so permissions literally named `__empty__` are no longer filtered out silently.
+
+### Fixed
+
+- **Tenancy isolation leak on roles** — Role cache keys in multi-tenant deployments are now per-tenant, preventing one tenant from reading or mutating another tenant's role/permission pivot data.
+- **`flushAll` in multi-tenant deployments** — The decorator no longer clears every tenant's keys; it scans and deletes only the current tenant's prefix space.
+
+### Upgrade Guide
+
+From `v3.0.0` → `v4.0.0-beta.1`:
+
+1. **Run `composer require scabarcas/laravel-permissions-redis:^4.0@beta`**.
+2. **If you implement `PermissionRepositoryInterface`** yourself, add the three new methods (`setPermissionGroups`, `getPermissionGroups`, `deletePermissionGroup`). See `RedisPermissionRepository` for a reference implementation.
+3. **Run `php artisan permissions-redis:warm --fresh`** to populate the new `auth:permission_groups` Redis hash. Without this, `getAllPermissions()` returns DTOs with `group: null`.
+4. **Optional** — Publish the refreshed config (`php artisan vendor:publish --tag=permissions-redis-config`) to pick up the new `resolver_cache_limit`, `resolver_warm_cooldown`, and `queue` options.
+
 ## [3.0.0] - 2026-03-31
 
 ### Added

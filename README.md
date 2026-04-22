@@ -289,7 +289,7 @@ All options live in `config/permissions-redis.php`:
 | `redis_connection` | `PERMISSIONS_REDIS_CONNECTION` | `'default'` | Redis connection from `config/database.php` |
 | `prefix` | `PERMISSIONS_REDIS_PREFIX` | `'auth:'` | Prefix for all Redis keys |
 | `ttl` | `PERMISSIONS_REDIS_TTL` | `86400` | Cache TTL in seconds (24h) |
-| `user_model` | `PERMISSIONS_REDIS_USER_MODEL` | `App\Models\User` | Your User model class |
+| `user_model` | `PERMISSIONS_REDIS_USER_MODEL` | `App\Models\User` | Your User model — accepts a string **or array** of FQCNs |
 | `log_channel` | `PERMISSIONS_REDIS_LOG_CHANNEL` | `null` | Log channel (`null` = default) |
 | `register_gate` | — | `true` | Enable `Gate::before` integration |
 | `register_middleware` | — | `true` | Register middleware aliases |
@@ -297,6 +297,10 @@ All options live in `config/permissions-redis.php`:
 | `super_admin_role` | `PERMISSIONS_REDIS_SUPER_ADMIN_ROLE` | `null` | Role that bypasses all checks |
 | `wildcard_permissions` | `PERMISSIONS_REDIS_WILDCARD` | `false` | Enable `fnmatch()` wildcard patterns |
 | `register_blade_directives` | — | `true` | Register Blade directives |
+| `resolver_cache_limit` | `PERMISSIONS_REDIS_RESOLVER_LIMIT` | `1000` | Max users held in the in-memory resolver cache before LRU eviction |
+| `resolver_warm_cooldown` | `PERMISSIONS_REDIS_WARM_COOLDOWN` | `1.0` | Seconds before a failed cache-miss warm is retried for the same user |
+| `queue.connection` | `PERMISSIONS_REDIS_QUEUE_CONNECTION` | `null` | Queue connection used by `WarmUserCacheJob` (`null` = default) |
+| `queue.name` | `PERMISSIONS_REDIS_QUEUE_NAME` | `'default'` | Queue name for warming jobs |
 | `seed` | — | *(see config)* | Roles and permissions to seed via CLI |
 | `tables` | — | *(see config)* | Custom table names |
 
@@ -321,6 +325,20 @@ class User extends Authenticatable
     use HasRedisPermissions;
 }
 ```
+
+#### Multiple User Models
+
+If your application authorizes more than one Eloquent model (e.g., `User` for the web app and `Admin` for the back office), configure an **array** of FQCNs:
+
+```php
+// config/permissions-redis.php
+'user_model' => [
+    App\Models\User::class,
+    App\Models\Admin::class,
+],
+```
+
+`AuthorizationCacheManager` iterates all configured types when resolving role/permission assignments, and the `Gate::before` callback accepts all of them. Each model still needs the `HasRedisPermissions` trait.
 
 ### Creating Roles and Permissions
 
@@ -350,6 +368,10 @@ $editor->givePermissionTo('posts.create', 'posts.edit');
 
 // Remove permissions
 $editor->revokePermissionTo('posts.delete');
+
+// Check whether a role grants a specific permission (reads Redis)
+$editor->hasPermission('posts.create');          // bool
+$editor->hasPermission('reports.export', 'api'); // optional guard
 ```
 
 ### Assigning Roles and Permissions
@@ -400,8 +422,11 @@ $user->hasAnyRole('admin', 'editor');    // bool
 // All roles required
 $user->hasAllRoles('admin', 'editor');   // bool
 
-// Get all permissions (returns Collection of PermissionDTO)
+// Get all permissions (returns Collection of PermissionDTO — includes `name`, `guard`, `group`)
 $user->getAllPermissions();
+
+// Group permissions by their `group` metadata (e.g., "user-management", "billing")
+$user->getAllPermissions()->groupBy('group');
 
 // Get permission names only
 $user->getPermissionNames();    // Collection<string>
@@ -412,11 +437,13 @@ $user->getRoleNames();          // Collection<string>
 
 #### Query Scopes
 
+> **⚠️ Scopes run SQL, not Redis.** `scopeRole` and `scopePermission` issue database queries against the pivot tables and do **not** consult the Redis cache. Use them for reporting, admin dashboards, or any context where you need the full user list — not in hot authorization paths (`hasPermissionTo`, middleware, Blade). For a throughput-sensitive "which users have role X" lookup, call `$cacheManager->getUserIdsAffectedByPermission($name)` or the equivalent role-cache method, both of which read from Redis.
+
 ```php
-// Find users with a specific role
+// Find users with a specific role (SQL query)
 User::role('admin')->get();
 
-// Find users with a specific permission
+// Find users with a specific permission (SQL query)
 User::permission('posts.edit')->get();
 ```
 
@@ -499,6 +526,27 @@ Route::get('/reports', [ReportController::class, 'index'])
 @endhasallpermissions
 ```
 
+#### Guard Override
+
+All six directives accept an optional second argument to scope the check to a specific guard (defaults to the current authentication driver):
+
+```blade
+{{-- Check under the 'api' guard --}}
+@role('admin', 'api')
+    <a href="/api-admin">API Admin</a>
+@endrole
+
+@permission('posts.delete', 'api')
+    <button class="btn-danger">Delete Post</button>
+@endpermission
+
+@hasanyrole('admin|editor', 'api')
+    <a href="/dashboard">Dashboard</a>
+@endhasanyrole
+```
+
+This is especially useful in SPA or API-token contexts where the active web session differs from the guard you want to authorize against.
+
 ### Gate Integration
 
 When `register_gate` is enabled (default), Laravel's Gate resolves permissions through Redis:
@@ -578,6 +626,18 @@ php artisan permissions-redis:flush
 php artisan permissions-redis:stats
 ```
 
+Both warm commands accept `--queue` to push the operation onto the queue instead of running it synchronously. This is the recommended approach for large user tables or post-deploy rewarms:
+
+```bash
+# Queue the full rewarm (uses queue.connection / queue.name from config)
+php artisan permissions-redis:warm --queue
+
+# Queue a single user (useful in scripts after bulk assignments)
+php artisan permissions-redis:warm-user 42 --queue
+```
+
+Under the hood this dispatches `WarmUserCacheJob` per user; the job is idempotent and safe to retry.
+
 #### Programmatic Access
 
 ```php
@@ -603,10 +663,30 @@ The cache is automatically invalidated when:
 | Event | Trigger | Action |
 |---|---|---|
 | `RolesAssigned` | `assignRole()`, `syncRoles()`, `removeRole()` | Rewarm user + reindex role→users |
+| `PermissionsAssigned` | `givePermissionTo()`, `revokePermissionTo()`, `syncPermissions()` on a user | Rewarm user |
 | `PermissionsSynced` | Role permissions updated | Rewarm role + all users with that role |
 | `RoleDeleted` | `Role::delete()` | Evict role + rewarm affected users |
-| `UserDeleted` | Manually dispatched | Evict user cache |
+| `UserDeleted` | User model deleted (via `DispatchesPermissionEvents` trait) | Evict user cache |
 | `Login` | User logs in (if `warm_on_login` enabled) | Warm user cache |
+
+To auto-dispatch `UserDeleted`, add the trait to your User model:
+
+```php
+use Scabarcas\LaravelPermissionsRedis\Traits\DispatchesPermissionEvents;
+
+class User extends Authenticatable
+{
+    use HasRedisPermissions, DispatchesPermissionEvents;
+}
+```
+
+#### Rate-limited cache-miss warming
+
+When a permission check lands on a user whose cache is missing in Redis, `PermissionResolver` triggers `warmUser()` automatically. To protect the database from warm storms (e.g., Redis is cold after a restart and thousands of simultaneous requests hit the same user), the resolver records each warm attempt and suppresses retries for `resolver_warm_cooldown` seconds (default `1.0s`). This is in-memory per worker; tune it via config or the `PERMISSIONS_REDIS_WARM_COOLDOWN` env variable.
+
+#### Multi-tenant deployments
+
+When `TenantAwareRedisPermissionRepository` is registered, all **user and role** cache keys are prefixed with the current tenant ID (`t:{id}:*`). Permission **group metadata** is intentionally stored globally (un-prefixed) because permission definitions live in the shared `permissions` table and are not tenant-specific.
 
 ### Database Seeding
 
