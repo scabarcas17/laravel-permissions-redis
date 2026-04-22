@@ -102,6 +102,35 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Resolver In-Memory Cache Limit
+    |--------------------------------------------------------------------------
+    |
+    | Maximum number of user entries to keep in the PermissionResolver's
+    | in-memory cache. Prevents unbounded growth in long-running processes
+    | like queue workers. When exceeded, the oldest half is evicted.
+    |
+    */
+
+    'resolver_cache_limit' => (int) env('PERMISSIONS_REDIS_RESOLVER_CACHE_LIMIT', 1000),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Resolver Cache-Miss Warm Cooldown (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | After a cache miss triggers a warm-from-database for a given user, the
+    | resolver will not re-warm that same user for this many seconds even if
+    | subsequent lookups still report "cache miss". Protects the database
+    | from repeated warm attempts when Redis is unavailable or a user has
+    | genuinely no permissions. Use fractional values for sub-second
+    | cooldowns (e.g. 0.25). Set to 0 to disable.
+    |
+    */
+
+    'resolver_warm_cooldown' => (float) env('PERMISSIONS_REDIS_RESOLVER_WARM_COOLDOWN', 1.0),
+
+    /*
+    |--------------------------------------------------------------------------
     | Super Admin Role
     |--------------------------------------------------------------------------
     |

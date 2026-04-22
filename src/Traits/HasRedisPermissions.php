@@ -23,6 +23,9 @@ trait HasRedisPermissions
 {
     private ?string $guardOverride = null;
 
+    /** @var array<int, string|null> */
+    private static array $roleIdNameCache = [];
+
     public function forGuard(string $guard): static
     {
         $this->guardOverride = $guard;
@@ -87,7 +90,7 @@ trait HasRedisPermissions
         foreach ($items as $role) {
             $name = match (true) {
                 $role instanceof BackedEnum => (string) $role->value,
-                is_int($role)               => Role::query()->where('id', $role)->value('name'),
+                is_int($role)               => $this->resolveRoleNameById($role),
                 default                     => (string) $role,
             };
 
@@ -298,6 +301,23 @@ trait HasRedisPermissions
                 $q->whereIn('permissions.id', $permissionIds);
             });
         });
+    }
+
+    /**
+     * @internal Used by Octane reset and testing utilities.
+     */
+    public static function flushRoleIdNameCache(): void
+    {
+        self::$roleIdNameCache = [];
+    }
+
+    private function resolveRoleNameById(int $roleId): ?string
+    {
+        if (!array_key_exists($roleId, self::$roleIdNameCache)) {
+            self::$roleIdNameCache[$roleId] = Role::query()->where('id', $roleId)->value('name');
+        }
+
+        return self::$roleIdNameCache[$roleId];
     }
 
     private function consumeGuardOverride(): ?string
