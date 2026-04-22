@@ -81,8 +81,8 @@ trait HasRedisPermissions
 
         $items = match (true) {
             is_string($roles), is_int($roles), $roles instanceof BackedEnum => [$roles],
-            $roles instanceof Collection => $roles->all(),
-            default                      => (array) $roles,
+            $roles instanceof Collection                                    => $roles->all(),
+            default                                                         => (array) $roles,
         };
 
         $resolver = $this->getPermissionResolver();

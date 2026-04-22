@@ -14,7 +14,7 @@
         "pestphp/pest": "^4.4",
         "phpstan/phpstan": "^2.1",
         "larastan/larastan": "^3",
-        "laravel/pint": "^1.29",
+        "laravel/pint": "1.29.1",
         "laravel/framework": "^12.0|^13.0",
         "orchestra/testbench": "^10.11|^11.0"
     },
