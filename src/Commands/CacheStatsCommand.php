@@ -43,9 +43,9 @@ class CacheStatsCommand extends Command
 
                 $relative = substr($key, strlen($prefix));
 
-                if (preg_match('/^user:(\d+):permissions$/', $relative, $matches)) {
+                if (preg_match('/^user:(.+):permissions$/', $relative, $matches)) {
                     $userIds[$matches[1]] = true;
-                } elseif (preg_match('/^role:(\d+):permissions$/', $relative, $matches)) {
+                } elseif (preg_match('/^role:(.+):permissions$/', $relative, $matches)) {
                     $roleIds[$matches[1]] = true;
                 }
             }

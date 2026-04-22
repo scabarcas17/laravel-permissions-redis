@@ -94,6 +94,57 @@ test('migrate command warms cache after migration', function () {
     expect($this->repo->getUserPermissions($user->id))->toContain('web|posts.edit');
 });
 
+test('migrate command fails when target tables do not exist and tables differ', function () {
+    // Create spatie tables but configure target tables that don't exist
+    Schema::create('sp_permissions', function ($table) {
+        $table->id();
+        $table->string('name');
+        $table->string('guard_name');
+        $table->timestamps();
+    });
+    Schema::create('sp_roles', function ($table) {
+        $table->id();
+        $table->string('name');
+        $table->string('guard_name');
+        $table->timestamps();
+    });
+    Schema::create('sp_model_has_permissions', function ($table) {
+        $table->unsignedBigInteger('permission_id');
+        $table->string('model_type');
+        $table->unsignedBigInteger('model_id');
+    });
+    Schema::create('sp_model_has_roles', function ($table) {
+        $table->unsignedBigInteger('role_id');
+        $table->string('model_type');
+        $table->unsignedBigInteger('model_id');
+    });
+    Schema::create('sp_role_has_permissions', function ($table) {
+        $table->unsignedBigInteger('permission_id');
+        $table->unsignedBigInteger('role_id');
+    });
+
+    config()->set('permission.table_names', [
+        'permissions'           => 'sp_permissions',
+        'roles'                 => 'sp_roles',
+        'model_has_permissions' => 'sp_model_has_permissions',
+        'model_has_roles'       => 'sp_model_has_roles',
+        'role_has_permissions'  => 'sp_role_has_permissions',
+    ]);
+
+    // Point target to non-existent tables
+    config()->set('permissions-redis.tables', [
+        'permissions'           => 'nonexistent_permissions',
+        'roles'                 => 'nonexistent_roles',
+        'model_has_permissions' => 'nonexistent_mhp',
+        'model_has_roles'       => 'nonexistent_mhr',
+        'role_has_permissions'  => 'nonexistent_rhp',
+    ]);
+
+    $this->artisan('permissions-redis:migrate-from-spatie --no-warm')
+        ->expectsOutputToContain('does not exist')
+        ->assertFailed();
+});
+
 test('migrate command copies data when tables differ', function () {
     // Create separate "spatie" tables
     Schema::create('sp_permissions', function ($table) {

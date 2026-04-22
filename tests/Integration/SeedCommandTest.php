@@ -111,6 +111,107 @@ test('seed command with --no-warm skips cache warming', function () {
         ->assertSuccessful();
 });
 
+test('seed command uses --guard option for roles and permissions', function () {
+    config()->set('permissions-redis.seed', [
+        'roles' => [
+            'api-admin' => ['api.users.create'],
+        ],
+        'permissions' => ['api.reports.view'],
+    ]);
+
+    $this->artisan('permissions-redis:seed --guard=api --no-warm')
+        ->assertSuccessful();
+
+    $this->assertDatabaseHas('roles', ['name' => 'api-admin', 'guard_name' => 'api']);
+    $this->assertDatabaseHas('permissions', ['name' => 'api.users.create', 'guard_name' => 'api']);
+    $this->assertDatabaseHas('permissions', ['name' => 'api.reports.view', 'guard_name' => 'api']);
+});
+
+test('seed command reads guard from seed config', function () {
+    config()->set('permissions-redis.seed', [
+        'guard' => 'api',
+        'roles' => [
+            'api-editor' => ['api.posts.edit'],
+        ],
+    ]);
+
+    $this->artisan('permissions-redis:seed --no-warm')
+        ->assertSuccessful();
+
+    $this->assertDatabaseHas('roles', ['name' => 'api-editor', 'guard_name' => 'api']);
+    $this->assertDatabaseHas('permissions', ['name' => 'api.posts.edit', 'guard_name' => 'api']);
+});
+
+test('seed command --guard option overrides config guard', function () {
+    config()->set('permissions-redis.seed', [
+        'guard' => 'api',
+        'roles' => [
+            'admin' => ['users.create'],
+        ],
+    ]);
+
+    $this->artisan('permissions-redis:seed --guard=sanctum --no-warm')
+        ->assertSuccessful();
+
+    $this->assertDatabaseHas('roles', ['name' => 'admin', 'guard_name' => 'sanctum']);
+    $this->assertDatabaseHas('permissions', ['name' => 'users.create', 'guard_name' => 'sanctum']);
+});
+
+test('seed command supports verbose role format with guard per role', function () {
+    config()->set('permissions-redis.seed', [
+        'roles' => [
+            'admin'     => ['users.create'],
+            'api_admin' => [
+                'guard'       => 'api',
+                'permissions' => ['api.users.read', 'api.users.write'],
+            ],
+        ],
+    ]);
+
+    $this->artisan('permissions-redis:seed --no-warm')
+        ->assertSuccessful();
+
+    $this->assertDatabaseHas('roles', ['name' => 'admin', 'guard_name' => 'web']);
+    $this->assertDatabaseHas('roles', ['name' => 'api_admin', 'guard_name' => 'api']);
+
+    $this->assertDatabaseHas('permissions', ['name' => 'users.create', 'guard_name' => 'web']);
+    $this->assertDatabaseHas('permissions', ['name' => 'api.users.read', 'guard_name' => 'api']);
+    $this->assertDatabaseHas('permissions', ['name' => 'api.users.write', 'guard_name' => 'api']);
+});
+
+test('seed command supports verbose permission format with guard', function () {
+    config()->set('permissions-redis.seed', [
+        'permissions' => [
+            'reports.export',
+            ['name' => 'api.export', 'guard' => 'api'],
+        ],
+    ]);
+
+    $this->artisan('permissions-redis:seed --no-warm')
+        ->assertSuccessful();
+
+    $this->assertDatabaseHas('permissions', ['name' => 'reports.export', 'guard_name' => 'web']);
+    $this->assertDatabaseHas('permissions', ['name' => 'api.export', 'guard_name' => 'api']);
+});
+
+test('seed command verbose role creates its permissions on role guard even when default differs', function () {
+    config()->set('permissions-redis.seed', [
+        'guard' => 'web',
+        'roles' => [
+            'api_admin' => [
+                'guard'       => 'api',
+                'permissions' => ['api.scoped.action'],
+            ],
+        ],
+    ]);
+
+    $this->artisan('permissions-redis:seed --no-warm')
+        ->assertSuccessful();
+
+    $this->assertDatabaseHas('permissions', ['name' => 'api.scoped.action', 'guard_name' => 'api']);
+    $this->assertDatabaseMissing('permissions', ['name' => 'api.scoped.action', 'guard_name' => 'web']);
+});
+
 test('seed command warms cache by default', function () {
     config()->set('permissions-redis.seed', [
         'permissions' => ['users.create'],

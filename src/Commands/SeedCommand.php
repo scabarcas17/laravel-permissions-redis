@@ -13,7 +13,8 @@ class SeedCommand extends Command
 {
     protected $signature = 'permissions-redis:seed
         {--fresh : Delete all existing permissions and roles before seeding}
-        {--no-warm : Skip Redis cache warming after seeding}';
+        {--no-warm : Skip Redis cache warming after seeding}
+        {--guard= : Guard name to use for seeded roles and permissions}';
 
     protected $description = 'Seed permissions and roles from config';
 
@@ -21,16 +22,26 @@ class SeedCommand extends Command
 
     private int $rolesCreated = 0;
 
+    private string $guardName = 'web';
+
     public function handle(AuthorizationCacheManager $cacheManager): int
     {
-        /** @var array{roles?: array<string, array<string>>, permissions?: array<string>} $seedConfig */
+        /** @var array{roles?: array<string, mixed>, permissions?: array<mixed>, guard?: string} $seedConfig */
         $seedConfig = config('permissions-redis.seed', []);
 
-        /** @var array<string, array<string>> $roles */
+        /** @var array<string, mixed> $roles */
         $roles = $seedConfig['roles'] ?? [];
 
-        /** @var array<string> $standalonePermissions */
+        /** @var array<mixed> $standalonePermissions */
         $standalonePermissions = $seedConfig['permissions'] ?? [];
+
+        $guardOption = $this->option('guard');
+
+        if (is_string($guardOption) && $guardOption !== '') {
+            $this->guardName = $guardOption;
+        } else {
+            $this->guardName = $seedConfig['guard'] ?? 'web';
+        }
 
         if ($roles === [] && $standalonePermissions === []) {
             $this->warn('No seed data found in config/permissions-redis.php.');
@@ -99,27 +110,42 @@ class SeedCommand extends Command
         $this->line('  All existing data deleted.');
     }
 
-    /** @param array<string> $permissions */
+    /** @param array<mixed> $permissions */
     private function seedPermissions(array $permissions): void
     {
         foreach ($permissions as $permission) {
-            $this->findOrCreatePermission($permission);
+            if (is_string($permission)) {
+                $this->findOrCreatePermission($permission, $this->guardName);
+
+                continue;
+            }
+
+            if (is_array($permission) && isset($permission['name']) && is_string($permission['name'])) {
+                /** @var string $guard */
+                $guard = (isset($permission['guard']) && is_string($permission['guard']))
+                    ? $permission['guard']
+                    : $this->guardName;
+
+                $this->findOrCreatePermission($permission['name'], $guard);
+            }
         }
     }
 
-    /** @param array<string, array<string>> $roles */
+    /** @param array<string, mixed> $roles */
     private function seedRoles(array $roles): void
     {
-        foreach ($roles as $roleName => $permissions) {
+        foreach ($roles as $roleName => $roleConfig) {
+            [$guard, $permissions] = $this->normalizeRoleEntry($roleConfig);
+
             $role = Role::query()->firstOrCreate(
-                ['name' => $roleName, 'guard_name' => 'web'],
+                ['name' => $roleName, 'guard_name' => $guard],
             );
 
             $wasRecentlyCreated = $role->wasRecentlyCreated;
 
             if ($wasRecentlyCreated) {
                 $this->rolesCreated++;
-                $this->line("  Created role: <info>{$roleName}</info>");
+                $this->line("  Created role: <info>{$roleName}</info> (guard: {$guard})");
             } else {
                 $this->line("  Role exists: {$roleName}");
             }
@@ -127,7 +153,7 @@ class SeedCommand extends Command
             $permissionIds = [];
 
             foreach ($permissions as $permission) {
-                $permModel = $this->findOrCreatePermission($permission);
+                $permModel = $this->findOrCreatePermission($permission, $guard);
                 $permissionIds[] = $permModel->id;
             }
 
@@ -135,13 +161,40 @@ class SeedCommand extends Command
         }
     }
 
-    private function findOrCreatePermission(string $name): Permission
+    /**
+     * @return array{0: string, 1: array<string>}
+     */
+    private function normalizeRoleEntry(mixed $roleConfig): array
     {
-        $permission = Permission::findOrCreate($name);
+        if (is_array($roleConfig) && array_is_list($roleConfig)) {
+            /** @var array<string> $roleConfig */
+            return [$this->guardName, $roleConfig];
+        }
+
+        if (is_array($roleConfig)) {
+            /** @var string $guard */
+            $guard = (isset($roleConfig['guard']) && is_string($roleConfig['guard']))
+                ? $roleConfig['guard']
+                : $this->guardName;
+
+            /** @var array<string> $permissions */
+            $permissions = (isset($roleConfig['permissions']) && is_array($roleConfig['permissions']))
+                ? array_values($roleConfig['permissions'])
+                : [];
+
+            return [$guard, $permissions];
+        }
+
+        return [$this->guardName, []];
+    }
+
+    private function findOrCreatePermission(string $name, string $guard): Permission
+    {
+        $permission = Permission::findOrCreate($name, $guard);
 
         if ($permission->wasRecentlyCreated) {
             $this->permissionsCreated++;
-            $this->line("  Created permission: <info>{$name}</info>");
+            $this->line("  Created permission: <info>{$name}</info> (guard: {$guard})");
         }
 
         return $permission;

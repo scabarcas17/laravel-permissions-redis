@@ -61,7 +61,11 @@ class MigrateFromSpatieCommand extends Command
             $this->ensureSchemaCompatibility();
         } else {
             $this->info('Tables differ — copying data from Spatie tables...');
-            $this->ensureTargetTablesExist();
+
+            if (!$this->ensureTargetTablesExist()) {
+                return self::FAILURE;
+            }
+
             $this->copyData();
         }
 
@@ -186,16 +190,18 @@ class MigrateFromSpatieCommand extends Command
         }
     }
 
-    private function ensureTargetTablesExist(): void
+    private function ensureTargetTablesExist(): bool
     {
         foreach ($this->targetTableNames as $key => $tableName) {
             if (!Schema::hasTable($tableName)) {
                 $this->error("Target table '{$tableName}' ({$key}) does not exist.");
                 $this->error("Run 'php artisan migrate' first to create the target tables.");
 
-                return;
+                return false;
             }
         }
+
+        return true;
     }
 
     private function copyData(): void
