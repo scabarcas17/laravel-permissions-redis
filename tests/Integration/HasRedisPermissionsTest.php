@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Events\PermissionsAssigned;
 use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
 use Scabarcas\LaravelPermissionsRedis\Models\Permission;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
@@ -217,6 +218,35 @@ test('syncPermissions replaces all direct permissions', function () {
         'permission_id' => $extraPerm->id,
         'model_id'      => $this->user->id,
     ]);
+});
+
+test('givePermissionTo dispatches PermissionsAssigned event', function () {
+    Permission::create(['name' => 'special.access', 'guard_name' => 'web']);
+    Event::fake([PermissionsAssigned::class]);
+
+    $this->user->givePermissionTo('special.access');
+
+    Event::assertDispatched(PermissionsAssigned::class, fn (PermissionsAssigned $e): bool => $e->user->is($this->user));
+});
+
+test('revokePermissionTo dispatches PermissionsAssigned event', function () {
+    Permission::create(['name' => 'special.access', 'guard_name' => 'web']);
+    $this->user->givePermissionTo('special.access');
+
+    Event::fake([PermissionsAssigned::class]);
+
+    $this->user->revokePermissionTo('special.access');
+
+    Event::assertDispatched(PermissionsAssigned::class);
+});
+
+test('syncPermissions dispatches PermissionsAssigned event', function () {
+    Permission::create(['name' => 'extra.access', 'guard_name' => 'web']);
+    Event::fake([PermissionsAssigned::class]);
+
+    $this->user->syncPermissions(['extra.access']);
+
+    Event::assertDispatched(PermissionsAssigned::class);
 });
 
 // ─── Relationships ───

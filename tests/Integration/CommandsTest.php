@@ -2,10 +2,13 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Jobs\WarmAllCacheJob;
+use Scabarcas\LaravelPermissionsRedis\Jobs\WarmUserCacheJob;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
@@ -107,6 +110,86 @@ test('permissions-redis:flush aborts when not confirmed', function () {
         ->assertSuccessful();
 
     expect($this->repo->getUserPermissions(1))->toContain('test.perm');
+});
+
+test('permissions-redis:warm --queue dispatches WarmAllCacheJob', function () {
+    Bus::fake();
+
+    $this->artisan('permissions-redis:warm --queue')
+        ->expectsOutputToContain('Queued authorization cache warm')
+        ->assertSuccessful();
+
+    Bus::assertDispatched(WarmAllCacheJob::class, fn (WarmAllCacheJob $job): bool => $job->flush === true);
+});
+
+test('permissions-redis:warm --queue --no-flush dispatches WarmAllCacheJob with flush=false', function () {
+    Bus::fake();
+
+    $this->artisan('permissions-redis:warm --queue --no-flush')
+        ->expectsOutputToContain('Queued authorization cache rewarm')
+        ->assertSuccessful();
+
+    Bus::assertDispatched(WarmAllCacheJob::class, fn (WarmAllCacheJob $job): bool => $job->flush === false);
+});
+
+test('permissions-redis:warm --queue with connection dispatches on that connection', function () {
+    Bus::fake();
+
+    $this->artisan('permissions-redis:warm --queue=redis')
+        ->assertSuccessful();
+
+    Bus::assertDispatched(WarmAllCacheJob::class, fn (WarmAllCacheJob $job): bool => $job->connection === 'redis');
+});
+
+test('permissions-redis:warm-user --queue dispatches WarmUserCacheJob', function () {
+    Bus::fake();
+
+    $this->artisan('permissions-redis:warm-user 42 --queue')
+        ->expectsOutputToContain('Queued authorization cache warm for user 42')
+        ->assertSuccessful();
+
+    Bus::assertDispatched(WarmUserCacheJob::class, fn (WarmUserCacheJob $job): bool => $job->userId === 42);
+});
+
+test('permissions-redis:warm-user --queue=sqs dispatches on given connection', function () {
+    Bus::fake();
+
+    $this->artisan('permissions-redis:warm-user 7 --queue=sqs')
+        ->assertSuccessful();
+
+    Bus::assertDispatched(WarmUserCacheJob::class, fn (WarmUserCacheJob $job): bool => $job->connection === 'sqs');
+});
+
+test('WarmUserCacheJob warms the user via AuthorizationCacheManager', function () {
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+
+    $roleId = DB::table('roles')->insertGetId(['name' => 'admin', 'guard_name' => 'web']);
+    $permId = DB::table('permissions')->insertGetId(['name' => 'posts.publish', 'guard_name' => 'web']);
+
+    DB::table('role_has_permissions')->insert(['role_id' => $roleId, 'permission_id' => $permId]);
+    DB::table('model_has_roles')->insert([
+        'role_id'    => $roleId,
+        'model_id'   => $user->id,
+        'model_type' => User::class,
+    ]);
+
+    (new WarmUserCacheJob($user->id))->handle(app(AuthorizationCacheManager::class));
+
+    expect($this->repo->getUserPermissions($user->id))->toContain('web|posts.publish');
+});
+
+test('WarmAllCacheJob with flush=true calls warmAll', function () {
+    $manager = Mockery::mock(AuthorizationCacheManager::class);
+    $manager->shouldReceive('warmAll')->once();
+
+    (new WarmAllCacheJob(flush: true))->handle($manager);
+});
+
+test('WarmAllCacheJob with flush=false calls rewarmAll', function () {
+    $manager = Mockery::mock(AuthorizationCacheManager::class);
+    $manager->shouldReceive('rewarmAll')->once();
+
+    (new WarmAllCacheJob(flush: false))->handle($manager);
 });
 
 test('permissions-redis:stats displays cache statistics', function () {

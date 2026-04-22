@@ -18,6 +18,14 @@ use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepositor
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 test('binds PermissionRepositoryInterface to RedisPermissionRepository', function () {
+    // TestCase binds the InMemoryPermissionRepository by default so Eloquent
+    // model hooks do not hit Redis. Re-register the service provider in
+    // isolation to verify the production default binding.
+    $this->app->forgetInstance(PermissionRepositoryInterface::class);
+    unset($this->app[PermissionRepositoryInterface::class]);
+
+    (new PermissionsRedisServiceProvider($this->app))->register();
+
     $instance = app(PermissionRepositoryInterface::class);
 
     expect($instance)->toBeInstanceOf(RedisPermissionRepository::class);
@@ -97,6 +105,29 @@ test('Gate::before skips non-matching user models', function () {
     $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
 
     expect(Gate::forUser($user)->allows('anything'))->toBeFalse();
+});
+
+test('Gate::before supports multiple user models configured as array', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+    $this->app->singleton(AuthorizationCacheManager::class, fn () => new AuthorizationCacheManager($repo));
+
+    config()->set('permissions-redis.register_gate', true);
+    config()->set('permissions-redis.user_model', [User::class, 'App\\Models\\Admin']);
+
+    (new PermissionsRedisServiceProvider($this->app))->boot();
+
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+    $roleId = DB::table('roles')->insertGetId(['name' => 'admin', 'guard_name' => 'web']);
+    $permId = DB::table('permissions')->insertGetId(['name' => 'users.create', 'guard_name' => 'web']);
+    DB::table('role_has_permissions')->insert(['role_id' => $roleId, 'permission_id' => $permId]);
+    DB::table('model_has_roles')->insert([
+        'role_id' => $roleId, 'model_id' => $user->id, 'model_type' => User::class,
+    ]);
+
+    app(AuthorizationCacheManager::class)->warmUser($user->id);
+
+    expect(Gate::forUser($user)->allows('users.create'))->toBeTrue();
 });
 
 test('registers warm on login listener when config enabled', function () {

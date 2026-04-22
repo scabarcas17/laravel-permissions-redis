@@ -152,3 +152,56 @@ test('hasallpermissions returns false when user lacks one', function () {
 test('hasallpermissions returns false when not authenticated', function () {
     expect(Blade::check('hasallpermissions', 'users.create'))->toBeFalse();
 });
+
+// ─── Guard override ───
+
+test('role directive accepts explicit guard parameter', function () {
+    $this->actingAs($this->user);
+    $this->repo->setUserRoles($this->user->id, ['web|admin', 'api|editor']);
+
+    expect(Blade::check('role', 'admin', 'web'))->toBeTrue()
+        ->and(Blade::check('role', 'editor', 'api'))->toBeTrue()
+        // admin only exists in web guard
+        ->and(Blade::check('role', 'admin', 'api'))->toBeFalse();
+});
+
+test('permission directive accepts explicit guard parameter', function () {
+    $this->actingAs($this->user);
+    $this->repo->setUserPermissions($this->user->id, ['web|users.create', 'api|tokens.issue']);
+
+    expect(Blade::check('permission', 'users.create', 'web'))->toBeTrue()
+        ->and(Blade::check('permission', 'tokens.issue', 'api'))->toBeTrue()
+        ->and(Blade::check('permission', 'users.create', 'api'))->toBeFalse();
+});
+
+test('hasanyrole accepts explicit guard parameter', function () {
+    $this->actingAs($this->user);
+    $this->repo->setUserRoles($this->user->id, ['api|editor']);
+
+    expect(Blade::check('hasanyrole', 'admin|editor', 'api'))->toBeTrue()
+        ->and(Blade::check('hasanyrole', 'admin|editor', 'web'))->toBeFalse();
+});
+
+test('hasanypermission accepts explicit guard parameter', function () {
+    $this->actingAs($this->user);
+    $this->repo->setUserPermissions($this->user->id, ['api|tokens.issue']);
+
+    expect(Blade::check('hasanypermission', 'users.create|tokens.issue', 'api'))->toBeTrue()
+        ->and(Blade::check('hasanypermission', 'users.create|tokens.issue', 'web'))->toBeFalse();
+});
+
+test('hasallroles accepts explicit guard parameter', function () {
+    $this->actingAs($this->user);
+    $this->repo->setUserRoles($this->user->id, ['api|admin', 'api|editor']);
+
+    expect(Blade::check('hasallroles', 'admin|editor', 'api'))->toBeTrue()
+        ->and(Blade::check('hasallroles', 'admin|editor', 'web'))->toBeFalse();
+});
+
+test('hasallpermissions accepts explicit guard parameter', function () {
+    $this->actingAs($this->user);
+    $this->repo->setUserPermissions($this->user->id, ['api|tokens.issue', 'api|tokens.revoke']);
+
+    expect(Blade::check('hasallpermissions', 'tokens.issue|tokens.revoke', 'api'))->toBeTrue()
+        ->and(Blade::check('hasallpermissions', 'tokens.issue|tokens.revoke', 'web'))->toBeFalse();
+});

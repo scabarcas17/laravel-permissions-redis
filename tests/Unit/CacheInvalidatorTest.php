@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Events\PermissionsAssigned;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
 use Scabarcas\LaravelPermissionsRedis\Events\RoleDeleted;
 use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
@@ -39,6 +40,15 @@ test('handlePermissionsSynced handles role with no users', function () {
     $this->repository->shouldReceive('getRoleUserIds')->with(5)->once()->andReturn([]);
 
     $this->invalidator->handlePermissionsSynced(new PermissionsSynced($role));
+});
+
+test('handlePermissionsAssigned warms user cache', function () {
+    $user = new User();
+    $user->id = 42;
+
+    $this->cacheManager->shouldReceive('warmUser')->with(42)->once();
+
+    $this->invalidator->handlePermissionsAssigned(new PermissionsAssigned($user));
 });
 
 test('handleRolesAssigned warms user cache', function () {

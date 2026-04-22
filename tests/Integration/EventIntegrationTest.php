@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\DB;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Events\PermissionsAssigned;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
 use Scabarcas\LaravelPermissionsRedis\Events\RoleDeleted;
 use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
@@ -71,6 +72,21 @@ test('RolesAssigned event warms user and recomputes role indexes', function () {
         ->and($this->repo->getUserRoles($user->id))->toContain('web|admin')
         // rewarmUserRoleIndexes warms role cache with user reverse index
         ->and($this->repo->getRoleUserIds($role->id))->toContain($user->id);
+});
+
+test('PermissionsAssigned event warms user cache', function () {
+    $user = User::create(['name' => 'Jane', 'email' => 'jane@test.com']);
+
+    $permId = DB::table('permissions')->insertGetId(['name' => 'direct.perm', 'guard_name' => 'web']);
+    DB::table('model_has_permissions')->insert([
+        'permission_id' => $permId,
+        'model_id'      => $user->id,
+        'model_type'    => User::class,
+    ]);
+
+    event(new PermissionsAssigned($user));
+
+    expect($this->repo->getUserPermissions($user->id))->toContain('web|direct.perm');
 });
 
 test('RoleDeleted event clears role cache and recomputes affected users', function () {

@@ -8,8 +8,8 @@ use BackedEnum;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Collection;
-use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
+use Scabarcas\LaravelPermissionsRedis\Events\PermissionsAssigned;
 use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
 use Scabarcas\LaravelPermissionsRedis\Models\Permission;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
@@ -267,7 +267,17 @@ trait HasRedisPermissions
             ->withPivotValue('model_type', static::class);
     }
 
-    /** @param string|int|array<string|int> $roles */
+    /**
+     * Eloquent scope — filter users by role via SQL JOINs on the pivot tables.
+     *
+     * NOTE: unlike hasRole()/hasPermission(), this scope runs against the
+     * relational database, not the Redis cache. Use it when you need to
+     * paginate or query "users with role X"; avoid it in hot permission-check
+     * paths because it does NOT read from Redis.
+     *
+     * @param string|int|array<string|int> $roles
+     * @param mixed                        $query
+     */
     public function scopeRole($query, mixed $roles, ?string $guard = null)
     {
         $roles = is_array($roles) ? $roles : [$roles];
@@ -282,7 +292,17 @@ trait HasRedisPermissions
         });
     }
 
-    /** @param string|int|array<string|int> $permissions */
+    /**
+     * Eloquent scope — filter users by permission via SQL JOINs through the
+     * permission and role pivot tables.
+     *
+     * NOTE: unlike hasPermission(), this scope queries the database directly
+     * and does NOT use the Redis cache. It is intended for list/query use
+     * cases (e.g. "list users who can X"), not authorization checks.
+     *
+     * @param string|int|array<string|int> $permissions
+     * @param mixed                        $query
+     */
     public function scopePermission($query, mixed $permissions, ?string $guard = null)
     {
         $permissions = is_array($permissions) ? $permissions : [$permissions];
@@ -465,10 +485,7 @@ trait HasRedisPermissions
 
     private function invalidatePermissionsCache(): void
     {
+        event(new PermissionsAssigned($this));
         $this->getPermissionResolver()->flushUser($this->id);
-
-        /** @var AuthorizationCacheManager $cacheManager */
-        $cacheManager = app(AuthorizationCacheManager::class);
-        $cacheManager->warmUser($this->id);
     }
 }

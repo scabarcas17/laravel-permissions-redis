@@ -30,6 +30,7 @@ use Scabarcas\LaravelPermissionsRedis\Middleware\PermissionMiddleware;
 use Scabarcas\LaravelPermissionsRedis\Middleware\RoleMiddleware;
 use Scabarcas\LaravelPermissionsRedis\Middleware\RoleOrPermissionMiddleware;
 use Scabarcas\LaravelPermissionsRedis\Resolver\PermissionResolver;
+use Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions;
 
 class PermissionsRedisServiceProvider extends ServiceProvider
 {
@@ -121,10 +122,19 @@ class PermissionsRedisServiceProvider extends ServiceProvider
     private function registerGateIntegration(): void
     {
         Gate::before(function (Authenticatable $user, string $ability): ?bool {
-            /** @var string $userModel */
-            $userModel = config('permissions-redis.user_model', 'App\\Models\\User');
+            $userModels = $this->configuredUserModels();
 
-            if (!$user instanceof $userModel) {
+            $matches = false;
+
+            foreach ($userModels as $userModel) {
+                if ($user instanceof $userModel) {
+                    $matches = true;
+
+                    break;
+                }
+            }
+
+            if (!$matches) {
                 return null;
             }
 
@@ -142,6 +152,22 @@ class PermissionsRedisServiceProvider extends ServiceProvider
 
             return null;
         });
+    }
+
+    /**
+     * @return array<string>
+     */
+    private function configuredUserModels(): array
+    {
+        $model = config('permissions-redis.user_model', 'App\\Models\\User');
+
+        if (is_array($model)) {
+            /** @var array<string> $model */
+            return array_values($model);
+        }
+
+        /** @var string $model */
+        return [$model];
     }
 
     /**
@@ -227,6 +253,8 @@ class PermissionsRedisServiceProvider extends ServiceProvider
             /** @var RedisPermissionRepository $repository */
             $repository = $this->app->make(RedisPermissionRepository::class);
             $repository->resetState();
+
+            HasRedisPermissions::flushRoleIdNameCache();
         });
     }
 }

@@ -46,7 +46,10 @@ return [
     |--------------------------------------------------------------------------
     |
     | The fully qualified class name of your application's User model.
-    | Used for morph type resolution and Gate integration.
+    | Used for morph type resolution and Gate integration. Pass an array
+    | to authorize multiple user models (e.g., ['App\Models\Admin',
+    | 'App\Models\Customer']). All configured models share the same
+    | Redis cache namespace, so their IDs must not collide.
     |
     */
 
@@ -243,14 +246,27 @@ return [
     | Define your application's roles and permissions here. Run
     | `php artisan permissions-redis:seed` to create them from this config.
     |
-    | Format:
+    | Default format (shares the global seed guard or --guard option):
     |   'roles' => [
     |       'role_name' => ['permission.one', 'permission.two'],
     |   ],
     |   'permissions' => ['standalone.permission'],
     |
-    | Permissions listed under roles are created automatically.
-    | The 'permissions' key is for standalone permissions not tied to any role.
+    | Verbose format (guard-per-role / guard-per-permission):
+    |   'roles' => [
+    |       'api_admin' => [
+    |           'guard'       => 'api',
+    |           'permissions' => ['api.users.read', 'api.users.write'],
+    |       ],
+    |   ],
+    |   'permissions' => [
+    |       'reports.export',
+    |       ['name' => 'api.export', 'guard' => 'api'],
+    |   ],
+    |
+    | Permissions listed under roles are created automatically using the role's
+    | guard. The 'permissions' key is for standalone permissions not tied to
+    | any role.
     |
     */
 

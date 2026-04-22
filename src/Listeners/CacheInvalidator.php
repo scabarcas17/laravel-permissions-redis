@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Concerns\LogsMessages;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Events\PermissionsAssigned;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
 use Scabarcas\LaravelPermissionsRedis\Events\RoleDeleted;
 use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
@@ -27,6 +28,7 @@ class CacheInvalidator
     public function subscribe(Dispatcher $events): void
     {
         $events->listen(PermissionsSynced::class, [self::class, 'handlePermissionsSynced']);
+        $events->listen(PermissionsAssigned::class, [self::class, 'handlePermissionsAssigned']);
         $events->listen(RolesAssigned::class, [self::class, 'handleRolesAssigned']);
         $events->listen(RoleDeleted::class, [self::class, 'handleRoleDeleted']);
         $events->listen(UserDeleted::class, [self::class, 'handleUserDeleted']);
@@ -53,6 +55,16 @@ class CacheInvalidator
         }
 
         $this->log("Cache invalidation complete: role {$roleId}, affected users: " . count($userIds));
+    }
+
+    public function handlePermissionsAssigned(PermissionsAssigned $event): void
+    {
+        /** @var int|string $userId */
+        $userId = $event->user->getKey();
+
+        $this->log("Cache invalidation: user {$userId} permissions assigned.");
+
+        $this->cacheManager->warmUser($userId);
     }
 
     public function handleRolesAssigned(RolesAssigned $event): void
@@ -95,20 +107,35 @@ class CacheInvalidator
 
     private function rewarmUserRoleIndexes(int|string $userId): void
     {
-        /** @var string $userModel */
-        $userModel = config('permissions-redis.user_model', 'App\\Models\\User');
+        $userModels = $this->configuredUserModels();
 
         /** @var string $table */
         $table = config('permissions-redis.tables.model_has_roles', 'model_has_roles');
 
         $roleIds = DB::table($table)
             ->where('model_id', $userId)
-            ->where('model_type', $userModel)
+            ->whereIn('model_type', $userModels)
             ->pluck('role_id');
 
         foreach ($roleIds as $roleId) {
             /** @var int $roleId */
             $this->cacheManager->warmRole($roleId);
         }
+    }
+
+    /**
+     * @return array<string>
+     */
+    private function configuredUserModels(): array
+    {
+        $model = config('permissions-redis.user_model', 'App\\Models\\User');
+
+        if (is_array($model)) {
+            /** @var array<string> $model */
+            return array_values($model);
+        }
+
+        /** @var string $model */
+        return [$model];
     }
 }
