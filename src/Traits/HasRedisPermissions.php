@@ -105,9 +105,8 @@ trait HasRedisPermissions
     public function hasAnyRole(mixed ...$roles): bool
     {
         $guard = $this->consumeGuardOverride();
-        $roles = is_array($roles[0] ?? null) ? $roles[0] : $roles;
 
-        foreach ($roles as $role) {
+        foreach ($this->flattenRoles($roles) as $role) {
             if ($this->hasRole($role, $guard)) {
                 return true;
             }
@@ -119,9 +118,8 @@ trait HasRedisPermissions
     public function hasAllRoles(mixed ...$roles): bool
     {
         $guard = $this->consumeGuardOverride();
-        $roles = is_array($roles[0] ?? null) ? $roles[0] : $roles;
 
-        foreach ($roles as $role) {
+        foreach ($this->flattenRoles($roles) as $role) {
             if (!$this->hasRole($role, $guard)) {
                 return false;
             }
@@ -383,7 +381,9 @@ trait HasRedisPermissions
     }
 
     /**
-     * Resolve a mixed list of role identifiers to IDs using a single query for names.
+     * Resolve a mixed list of role identifiers to IDs. Integer IDs are
+     * validated against the target guard and silently dropped if they do
+     * not belong to it — keeping guard isolation honest.
      *
      * @param array<mixed> $roles
      *
@@ -391,19 +391,30 @@ trait HasRedisPermissions
      */
     private function batchResolveRoleIds(array $roles, string $guard): array
     {
-        $intIds = [];
+        $rawIds = [];
         $names = [];
 
         foreach ($roles as $role) {
             if (is_int($role)) {
-                $intIds[] = $role;
+                $rawIds[] = $role;
             } elseif ($role instanceof BackedEnum) {
                 $names[] = (string) $role->value;
             } elseif (is_string($role)) {
                 $names[] = $role;
             } else {
-                $intIds[] = (int) $role;
+                $rawIds[] = (int) $role;
             }
+        }
+
+        $validated = [];
+
+        if ($rawIds !== []) {
+            $validated = Role::query()
+                ->where('guard_name', $guard)
+                ->whereIn('id', $rawIds)
+                ->pluck('id')
+                ->map(fn ($id): int => (int) $id)
+                ->all();
         }
 
         if ($names !== []) {
@@ -414,34 +425,43 @@ trait HasRedisPermissions
                 ->map(fn ($id): int => (int) $id)
                 ->all();
 
-            $intIds = array_merge($intIds, $resolved);
+            $validated = array_merge($validated, $resolved);
         }
 
-        return $intIds;
+        return $validated;
     }
 
     /**
-     * Resolve a mixed list of permission identifiers to IDs using a single query for names.
-     *
      * @param array<mixed> $permissions
      *
      * @return array<int>
      */
     private function batchResolvePermissionIds(array $permissions, string $guard): array
     {
-        $intIds = [];
+        $rawIds = [];
         $names = [];
 
         foreach ($permissions as $permission) {
             if (is_int($permission)) {
-                $intIds[] = $permission;
+                $rawIds[] = $permission;
             } elseif ($permission instanceof BackedEnum) {
                 $names[] = (string) $permission->value;
             } elseif (is_string($permission)) {
                 $names[] = $permission;
             } else {
-                $intIds[] = (int) $permission;
+                $rawIds[] = (int) $permission;
             }
+        }
+
+        $validated = [];
+
+        if ($rawIds !== []) {
+            $validated = Permission::query()
+                ->where('guard_name', $guard)
+                ->whereIn('id', $rawIds)
+                ->pluck('id')
+                ->map(fn ($id): int => (int) $id)
+                ->all();
         }
 
         if ($names !== []) {
@@ -452,10 +472,10 @@ trait HasRedisPermissions
                 ->map(fn ($id): int => (int) $id)
                 ->all();
 
-            $intIds = array_merge($intIds, $resolved);
+            $validated = array_merge($validated, $resolved);
         }
 
-        return $intIds;
+        return $validated;
     }
 
     /**
@@ -475,6 +495,16 @@ trait HasRedisPermissions
                 return (string) $permission;
             })
             ->all();
+    }
+
+    /**
+     * @param array<mixed> $roles
+     *
+     * @return array<mixed>
+     */
+    private function flattenRoles(array $roles): array
+    {
+        return collect($roles)->flatten()->all();
     }
 
     private function invalidateRolesCache(): void

@@ -42,7 +42,7 @@ class RoleOrPermissionMiddleware
             return $next($request);
         }
 
-        $rolesOrPermissions = explode('|', $roleOrPermission);
+        $rolesOrPermissions = array_map('trim', explode('|', $roleOrPermission));
 
         foreach ($rolesOrPermissions as $item) {
             if ($this->resolver->hasPermission($userId, $item, $guardName) || $this->resolver->hasRole($userId, $item, $guardName)) {

@@ -42,7 +42,7 @@ class RoleMiddleware
             return $next($request);
         }
 
-        $roles = explode('|', $role);
+        $roles = array_map('trim', explode('|', $role));
 
         foreach ($roles as $r) {
             if ($this->resolver->hasRole($userId, $r, $guardName)) {

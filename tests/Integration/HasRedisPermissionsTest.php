@@ -601,3 +601,93 @@ test('forGuard does not affect subsequent operations', function () {
         'model_id' => $this->user->id,
     ]);
 });
+
+test('hasAnyRole accepts a Collection and flattens it correctly', function () {
+    expect($this->user->hasAnyRole(collect(['editor', 'admin'])))->toBeTrue()
+        ->and($this->user->hasAnyRole(collect(['editor', 'viewer'])))->toBeFalse();
+});
+
+test('hasAllRoles accepts a Collection', function () {
+    DB::table('model_has_roles')->insert([
+        'role_id'    => $this->editorRole->id,
+        'model_id'   => $this->user->id,
+        'model_type' => User::class,
+    ]);
+    app(AuthorizationCacheManager::class)->warmUser($this->user->id);
+
+    expect($this->user->hasAllRoles(collect(['admin', 'editor'])))->toBeTrue()
+        ->and($this->user->hasAllRoles(collect(['admin', 'nonexistent'])))->toBeFalse();
+});
+
+test('assignRole with integer ID silently drops IDs that do not belong to the guard', function () {
+    Event::fake([RolesAssigned::class]);
+
+    $apiRole = Role::create(['name' => 'api-admin', 'guard_name' => 'api']);
+
+    // Caller is on default 'web' guard, but passes an API role's ID.
+    // The guard mismatch should cause the ID to be dropped silently.
+    $this->user->assignRole($apiRole->id);
+
+    $this->assertDatabaseMissing('model_has_roles', [
+        'role_id'  => $apiRole->id,
+        'model_id' => $this->user->id,
+    ]);
+});
+
+test('assignRole with integer ID on the correct guard still works', function () {
+    Event::fake([RolesAssigned::class]);
+
+    $apiRole = Role::create(['name' => 'api-editor', 'guard_name' => 'api']);
+
+    $this->user->forGuard('api')->assignRole($apiRole->id);
+
+    $this->assertDatabaseHas('model_has_roles', [
+        'role_id'  => $apiRole->id,
+        'model_id' => $this->user->id,
+    ]);
+});
+
+test('scopeRole with integer ID filters by guard and excludes cross-guard matches', function () {
+    // Create a web role and an api role with the SAME name but different guards.
+    $apiAdmin = Role::create(['name' => 'admin', 'guard_name' => 'api']);
+
+    $user2 = User::create(['name' => 'Jane', 'email' => 'jane@test.com']);
+    DB::table('model_has_roles')->insert([
+        'role_id' => $apiAdmin->id, 'model_id' => $user2->id, 'model_type' => User::class,
+    ]);
+
+    // Scope by the API admin's ID but with guard 'web' — should NOT match anyone.
+    $webQuery = User::query()->role($apiAdmin->id, 'web')->get();
+
+    expect($webQuery)->toHaveCount(0);
+
+    $apiQuery = User::query()->role($apiAdmin->id, 'api')->get();
+
+    expect($apiQuery->pluck('id')->all())->toBe([$user2->id]);
+});
+
+test('scopePermission with integer ID filters by guard', function () {
+    $apiPerm = Permission::create(['name' => 'users.create', 'guard_name' => 'api']);
+
+    $user2 = User::create(['name' => 'Jane', 'email' => 'jane@test.com']);
+    DB::table('model_has_permissions')->insert([
+        'permission_id' => $apiPerm->id, 'model_id' => $user2->id, 'model_type' => User::class,
+    ]);
+
+    expect(User::query()->permission($apiPerm->id, 'web')->get())->toHaveCount(0)
+        ->and(User::query()->permission($apiPerm->id, 'api')->get()->pluck('id')->all())->toBe([$user2->id]);
+});
+
+test('roleIdNameCache is flushed when a role is renamed', function () {
+    // Pre-warm the static cache by looking up the role by ID.
+    $this->user->hasRole($this->adminRole->id);
+
+    // Rename the role in the DB through Eloquent (triggers the saved hook).
+    $this->adminRole->update(['name' => 'renamed-admin']);
+
+    // Seed the repo so the user has the NEW name.
+    $this->repo->setUserRoles($this->user->id, ['web|renamed-admin']);
+
+    // Second lookup by ID should see the renamed role, not a stale 'admin'.
+    expect($this->user->hasRole($this->adminRole->id))->toBeTrue();
+});

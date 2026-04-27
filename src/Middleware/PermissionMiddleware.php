@@ -42,7 +42,7 @@ class PermissionMiddleware
             return $next($request);
         }
 
-        $permissions = explode('|', $permission);
+        $permissions = array_map('trim', explode('|', $permission));
 
         foreach ($permissions as $perm) {
             if ($this->resolver->hasPermission($userId, $perm, $guardName)) {

@@ -130,6 +130,30 @@ test('Gate::before supports multiple user models configured as array', function 
     expect(Gate::forUser($user)->allows('users.create'))->toBeTrue();
 });
 
+test('Gate::before resolves the guard that matches the user instead of always using default', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+    $this->app->singleton(AuthorizationCacheManager::class, fn () => new AuthorizationCacheManager($repo));
+
+    config()->set('permissions-redis.register_gate', true);
+    config()->set('permissions-redis.user_model', User::class);
+    config()->set('auth.guards', [
+        'web' => ['driver' => 'session', 'provider' => 'users'],
+        'api' => ['driver' => 'token', 'provider' => 'users'],
+    ]);
+
+    (new PermissionsRedisServiceProvider($this->app))->boot();
+
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+
+    $repo->setUserPermissions($user->id, ['api|tokens.issue']);
+    $repo->setUserRoles($user->id, []);
+
+    auth()->guard('api')->setUser($user);
+
+    expect(Gate::forUser($user)->allows('tokens.issue'))->toBeTrue();
+});
+
 test('registers warm on login listener when config enabled', function () {
     Event::fake();
 

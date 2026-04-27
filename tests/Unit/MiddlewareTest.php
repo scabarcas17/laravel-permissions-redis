@@ -99,6 +99,24 @@ describe('PermissionMiddleware', function () {
         $middleware = new PermissionMiddleware($resolver);
         $middleware->handle(makeRequestWithUser($user), passThrough(), 'users.create&users.delete');
     })->throws(UnauthorizedException::class);
+
+    test('AND operator trims whitespace around permissions', function () {
+        $resolver = Mockery::mock(PermissionResolverInterface::class);
+        $resolver->shouldReceive('hasPermission')->with(1, 'users.create', 'web')->once()->andReturn(true);
+        $resolver->shouldReceive('hasPermission')->with(1, 'users.edit', 'web')->once()->andReturn(true);
+
+        $user = new User();
+        $user->id = 1;
+
+        $middleware = new PermissionMiddleware($resolver);
+        $response = $middleware->handle(
+            makeRequestWithUser($user),
+            passThrough(),
+            ' users.create & users.edit '
+        );
+
+        expect($response->getContent())->toBe('OK');
+    });
 });
 
 // ─── RoleMiddleware ───

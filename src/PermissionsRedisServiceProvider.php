@@ -144,7 +144,7 @@ class PermissionsRedisServiceProvider extends ServiceProvider
             /** @var int|string $userId */
             $userId = $user->getAuthIdentifier();
 
-            $guard = auth()->getDefaultDriver();
+            $guard = $this->resolveGuardForUser($user);
 
             if ($resolver->hasPermission($userId, $ability, $guard)) {
                 return true;
@@ -152,6 +152,24 @@ class PermissionsRedisServiceProvider extends ServiceProvider
 
             return null;
         });
+    }
+
+    private function resolveGuardForUser(Authenticatable $user): string
+    {
+        $auth = auth();
+
+        /** @var array<string, array<string, mixed>> $guards */
+        $guards = config('auth.guards', []);
+
+        foreach ($guards as $name => $_config) {
+            $candidate = $auth->guard($name)->user();
+
+            if ($candidate !== null && $candidate->getAuthIdentifier() === $user->getAuthIdentifier()) {
+                return $name;
+            }
+        }
+
+        return $auth->getDefaultDriver();
     }
 
     /**
