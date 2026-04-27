@@ -12,24 +12,24 @@ return new class () extends Migration {
         $tables = config('permissions-redis.tables', []);
         $morphKeyType = config('permissions-redis.model_morph_key_type', 'int');
 
-        // 1. permissions table
+        // Lengths of 191 keep (name, guard_name) unique indexes within
+        // MySQL's 767-byte key limit under utf8mb4 on MySQL < 5.7.7.
         Schema::create($tables['permissions'] ?? 'permissions', function (Blueprint $table) {
             $table->bigIncrements('id');
-            $table->string('name');
+            $table->string('name', 191);
             $table->string('description')->nullable();
-            $table->string('group')->nullable();
-            $table->string('guard_name');
+            $table->string('group', 191)->nullable();
+            $table->string('guard_name', 191);
             $table->timestamps();
             $table->unique(['name', 'guard_name']);
             $table->index('group');
         });
 
-        // 2. roles table
         Schema::create($tables['roles'] ?? 'roles', function (Blueprint $table) {
             $table->bigIncrements('id');
-            $table->string('name');
+            $table->string('name', 191);
             $table->string('description')->nullable();
-            $table->string('guard_name');
+            $table->string('guard_name', 191);
             $table->timestamps();
             $table->unique(['name', 'guard_name']);
         });

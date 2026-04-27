@@ -6,6 +6,7 @@ namespace Scabarcas\LaravelPermissionsRedis\Testing;
 
 use BackedEnum;
 use Illuminate\Contracts\Auth\Authenticatable;
+use InvalidArgumentException;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
 use Scabarcas\LaravelPermissionsRedis\Models\Permission;
@@ -51,14 +52,20 @@ trait WithPermissions
         $created = [];
 
         foreach ($roles as $roleName => $permissions) {
-            $role = Role::findOrCreate(is_string($roleName) ? $roleName : (string) $permissions, $guard);
+            if (!is_string($roleName) || $roleName === '') {
+                throw new InvalidArgumentException(
+                    'seedRoles() expects an associative array keyed by role name.'
+                );
+            }
 
-            if (is_string($roleName) && is_array($permissions) && $permissions !== []) {
+            $role = Role::findOrCreate($roleName, $guard);
+
+            if (is_array($permissions) && $permissions !== []) {
                 $this->seedPermissions($permissions, $guard);
                 $role->syncPermissions($permissions);
             }
 
-            $created[is_string($roleName) ? $roleName : (string) $permissions] = $role;
+            $created[$roleName] = $role;
         }
 
         return $created;

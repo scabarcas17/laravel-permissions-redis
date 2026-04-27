@@ -16,7 +16,8 @@
         "larastan/larastan": "^3",
         "laravel/pint": "1.29.1",
         "laravel/framework": "^12.0|^13.0",
-        "orchestra/testbench": "^10.11|^11.0"
+        "orchestra/testbench": "^10.11|^11.0",
+        "predis/predis": "^3.4"
     },
     "license": "MIT",
     "keywords": ["laravel", "permissions", "roles", "redis", "authorization", "acl", "rbac", "access-control", "guard", "middleware", "cache", "performance"],

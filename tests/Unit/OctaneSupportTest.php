@@ -142,3 +142,34 @@ test('different users do not share cached data after flush', function () {
     $repository->shouldReceive('userHasPermission')->with(2, 'web|admin.panel')->once()->andReturn(false);
     expect($resolver->hasPermission(2, 'admin.panel'))->toBeFalse();
 });
+
+test('Octane RequestReceived listener flushes resolver, repository state, and role cache', function () {
+    config()->set('permissions-redis.octane.reset_on_request', true);
+
+    $resolver = Mockery::mock(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class);
+    $resolver->shouldReceive('flush')->once();
+
+    $repo = Mockery::mock(RedisPermissionRepository::class);
+    $repo->shouldReceive('resetState')->once();
+
+    $this->app->instance(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class, $resolver);
+    $this->app->instance(RedisPermissionRepository::class, $repo);
+
+    $requestReceivedClass = 'Laravel\\Octane\\Events\\RequestReceived';
+
+    if (!class_exists($requestReceivedClass)) {
+        eval('namespace Laravel\\Octane\\Events; class RequestReceived {}');
+    }
+
+    \Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions::class; // autoload
+    $reflection = new ReflectionClass(\Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions::class);
+    $cacheProp = $reflection->getProperty('roleIdNameCache');
+    $cacheProp->setAccessible(true);
+    $cacheProp->setValue(null, [42 => 'admin']);
+
+    (new \Scabarcas\LaravelPermissionsRedis\PermissionsRedisServiceProvider($this->app))->boot();
+
+    event(new $requestReceivedClass());
+
+    expect($cacheProp->getValue())->toBe([]);
+});

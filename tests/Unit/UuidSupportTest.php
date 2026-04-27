@@ -151,3 +151,23 @@ test('resolver handles both int and string user IDs simultaneously', function ()
     expect($resolver->hasPermission($intId, 'posts.create'))->toBeTrue();
     expect($resolver->hasPermission($uuid, 'posts.create'))->toBeFalse();
 });
+
+test('setRoleUsers preserves UUID user IDs through string cast round-trip', function () {
+    $repo = new InMemoryPermissionRepository();
+    $uuid1 = '550e8400-e29b-41d4-a716-446655440000';
+    $uuid2 = '01HXYZ1234567890ABCDEFGHIJ';
+
+    $repo->setRoleUsers(5, [$uuid1, $uuid2]);
+
+    expect($repo->getRoleUserIds(5))->toBe([$uuid1, $uuid2]);
+});
+
+test('InMemoryPermissionRepository setRoleUsers stores values as given without coercion', function () {
+    $repo = new InMemoryPermissionRepository();
+
+    $repo->setRoleUsers(5, [123, 456]);
+
+    // InMemory stores as-is; only the Redis implementation normalizes
+    // ctype_digit strings back to ints after the SMEMBERS round-trip.
+    expect($repo->getRoleUserIds(5))->toBe([123, 456]);
+});

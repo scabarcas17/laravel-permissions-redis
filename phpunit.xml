@@ -16,5 +16,8 @@
         <testsuite name="Integration">
             <directory>tests/Integration</directory>
         </testsuite>
+        <testsuite name="Redis">
+            <directory>tests/Redis</directory>
+        </testsuite>
     </testsuites>
 </phpunit>

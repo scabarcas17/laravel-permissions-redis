@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0-beta.2] - 2026-04-22
+
+Maintenance release of the 4.x beta. Fixes all issues surfaced by a deep audit
+of beta.1 — data-consistency bugs, atomicity gaps, and cross-implementation
+divergences between the in-memory test fake and the real Redis repository.
+
+### Breaking Changes
+
+- **`PermissionRepositoryInterface::replacePermissionGroups(array $groups): void`** — New method on the contract. Atomic rebuild of the permission groups hash. Any custom implementation of the interface must implement it.
+- **`AuthorizationCacheManager::warmAll()` now flushes first.** In beta.1 both `warmAll()` and `rewarmAll()` had identical no-flush bodies (flag was misleading). `warmAll()` now runs `flushAll()` before repopulating — deleted users/roles/permissions cannot survive as stale keys. Use `rewarmAll()` when a momentary read-downtime window is unacceptable.
+- **`PermissionDTO::$id` removed** — the property was declared but never populated by the resolver. If you read it, switch to looking up the `Permission` model directly.
+- **`batchResolveRoleIds`/`batchResolvePermissionIds` validate integer IDs against the target guard** — passing an ID that belongs to a different guard now silently drops it (matches the behavior already applied to string/enum names). Previously integer IDs bypassed the guard filter.
+- **Middleware trims whitespace on OR (`|`) lists.** `permission:'users.read | users.write'` now behaves the same as `permission:'users.read|users.write'`. Previously only the `&` separator trimmed.
+
+### Added
+
+- **`tests/Redis/` contract suite** — Every critical flow (set/has, empty sentinel, `replaceSetBatch` atomicity, tenant prefix, permission groups, TTL, `flushAll`) is now exercised against **a real Redis instance** via predis. Auto-skips when Redis is unavailable. Run with `./vendor/bin/pest --testsuite Redis`. Env overrides: `PERMISSIONS_REDIS_TEST_HOST`, `PERMISSIONS_REDIS_TEST_PORT`, `PERMISSIONS_REDIS_TEST_DB`, `PERMISSIONS_REDIS_TEST_SKIP=1`.
+- **`ScansRedisByPrefix` trait** — Shared scan helper that applies the Redis client's built-in prefix to SCAN MATCH patterns (neither predis nor phpredis auto-prefix the MATCH parameter). Used by `RedisPermissionRepository::flushAll`, `TenantAwareRedisPermissionRepository::flushAll`, and `CacheStatsCommand`.
+- **`hasAnyRole` / `hasAllRoles` accept a `Collection`** — consistent with `hasRole`. Previously only plain arrays and variadic args were handled.
+- **Regression tests for every fix** — 36 new tests covering BUGs 1-10 and I-1..I-9 from the audit.
+
+### Fixed
+
+- **`warmPermissionGroups` left stale metadata** (BUG-2). Deletion of a permission in the DB did not remove its entry from the `permission_groups` hash during a rewarm. The hash is now rebuilt atomically via `replacePermissionGroups` (DEL + HSET in MULTI/EXEC).
+- **`SeedCommand --fresh` corrupted Redis cache state** (BUG-3). `Role::query()->delete()` and `Permission::query()->delete()` bypassed model events, so the `deleted` hooks that clean up the permission groups hash and the role set keys never ran. Now wrapped in `withoutEvents(...)` with an explicit `flushAll()` afterwards to restore consistency.
+- **`warmAll()` and `rewarmAll()` did the same thing** (BUG-1). See Breaking Changes above.
+- **`warmUser` / `warmRole` were not atomic** (BUG-8). Permissions and roles were written in two separate MULTI/EXEC transactions; a concurrent reader could observe the new permission set alongside the old role set (or vice versa). Both methods now use `replaceSetBatch` for a single transaction.
+- **`PermissionResolver::evictIfNeeded` only triggered when `permissionCache` grew** (BUG-5). Callers that only exercised `getAllPermissions()` could grow `allPermissionsCache` unbounded. The trigger now checks the max size across all per-user caches, and only the exact overflow is evicted.
+- **`PermissionResolver::decodeEntry` crashed outside HTTP context** (BUG-4). `auth()->getDefaultDriver()` throws in some queue/console setups. Now guarded with a try/catch and falls back to `config('auth.defaults.guard', 'web')`.
+- **Cross-user group staleness in the resolver** (BUG-10). The per-user `permissionGroupsCache` has been removed; group metadata is fetched on every `getAllPermissions()` call (cheap HMGET) so admin-side group edits are immediately visible.
+- **`hasAnyRole` / `hasAllRoles` inconsistency with `hasRole`** (BUG-7). Both now accept Collections via `collect(...)->flatten()`.
+- **`scopeRole` / `scopePermission` ignored guard when given integer IDs** (BUG-9). Fixed: integer IDs are validated against the target guard before inclusion in the scope.
+- **`Gate::before` always resolved to `auth()->getDefaultDriver()`** (I-5). `Gate::forUser($apiUser)->allows(...)` now finds the guard whose authenticated user matches the target instance, falling back to the default.
+- **`HMSET` (deprecated in Redis 4.0) replaced with `HSET`** multi-field (BUG-6). Field/value pairs are now flattened so predis can serialize them correctly.
+- **`CacheStatsCommand` and `flushAll` SCAN MATCH pattern** missed the Redis client's built-in prefix, so on installations where Laravel's `database.redis.options.prefix` is configured (the default `laravel_database_`), no keys matched. The new `ScansRedisByPrefix` trait handles this correctly for both predis and phpredis.
+- **`Role` model static `$roleIdNameCache`** is now flushed on role rename and role deletion (I-6). Previously stale names could persist within a queue worker's memory.
+- **`WithPermissions::seedRoles` threw `Array to string conversion` on numerically-indexed input** (I-2). Now validates and throws a clear `InvalidArgumentException`.
+- **Migration column lengths pinned to 191** (I-7) so the `(name, guard_name)` unique index fits within MySQL's 767-byte key limit under utf8mb4 on MySQL < 5.7.7.
+- **`ensureUserCacheExists` warning demoted to debug** (I-9). In high-traffic deployments with cold caches, the warning produced significant log noise without actionable signal.
+- **Middleware OR (`|`) list whitespace trimming** — see Breaking Changes.
+
+### Migration from beta.1
+
+1. If you implement `PermissionRepositoryInterface` in your own code (adapters, test doubles), add `replacePermissionGroups(array $groups): void`.
+2. If you relied on `warmAll()` not flushing, switch the call to `rewarmAll()`.
+3. If you read `PermissionDTO::$id`, remove that code path (it was always `null`).
+4. If you pass role/permission integer IDs via a guard that doesn't own them (cross-guard leakage), expect them to be dropped silently — intentionally.
+
 ## [4.0.0-beta.1] - 2026-04-22
 
 ### Breaking Changes
@@ -148,6 +196,7 @@ First stable release of `scabarcas/laravel-permissions-redis`.
 - **Comprehensive test suite** — Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
 - **Documentation** — README with installation guide, usage examples, conventions, API reference, and C4 architecture diagrams.
 
+[4.0.0-beta.2]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.0-beta.1...v4.0.0-beta.2
 [4.0.0-beta.1]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v3.0.0...v4.0.0-beta.1
 [3.0.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v1.1.0...v2.0.0

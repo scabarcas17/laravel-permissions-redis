@@ -11,6 +11,7 @@ use InvalidArgumentException;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
 use Scabarcas\LaravelPermissionsRedis\Events\RoleDeleted;
+use Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions;
 
 /**
  * @property int         $id
@@ -124,7 +125,14 @@ class Role extends Model
 
     protected static function booted(): void
     {
+        static::saved(function (Role $role): void {
+            if ($role->wasChanged('name')) {
+                HasRedisPermissions::flushRoleIdNameCache();
+            }
+        });
+
         static::deleted(function (Role $role): void {
+            HasRedisPermissions::flushRoleIdNameCache();
             event(new RoleDeleted($role->id));
         });
     }
