@@ -10,6 +10,7 @@ use Scabarcas\LaravelPermissionsRedis\Concerns\LogsMessages;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
 use Scabarcas\LaravelPermissionsRedis\DTO\PermissionDTO;
+use Throwable;
 
 class PermissionResolver implements PermissionResolverInterface
 {
@@ -23,9 +24,6 @@ class PermissionResolver implements PermissionResolverInterface
 
     /** @var array<int|string, array<string>|null> */
     private array $allPermissionsCache = [];
-
-    /** @var array<int|string, array<string, string|null>> */
-    private array $permissionGroupsCache = [];
 
     /** @var array<int|string, array<string>|null> */
     private array $allRolesCache = [];
@@ -56,7 +54,6 @@ class PermissionResolver implements PermissionResolverInterface
         }
 
         $this->ensureUserCacheExists($userId);
-        $this->evictIfNeeded();
 
         $result = $this->repository->userHasPermission($userId, $cacheKey);
 
@@ -65,6 +62,7 @@ class PermissionResolver implements PermissionResolverInterface
         }
 
         $this->permissionCache[$userId][$cacheKey] = $result;
+        $this->evictIfNeeded();
 
         return $result;
     }
@@ -79,11 +77,11 @@ class PermissionResolver implements PermissionResolverInterface
         }
 
         $this->ensureUserCacheExists($userId);
-        $this->evictIfNeeded();
 
         $result = $this->repository->userHasRole($userId, $cacheKey);
 
         $this->roleCache[$userId][$cacheKey] = $result;
+        $this->evictIfNeeded();
 
         return $result;
     }
@@ -97,7 +95,7 @@ class PermissionResolver implements PermissionResolverInterface
             return new Collection();
         }
 
-        $groups = $this->loadPermissionGroups($userId, $names);
+        $groups = $this->repository->getPermissionGroups($names);
 
         /** @var array<int, PermissionDTO> $dtos */
         $dtos = [];
@@ -136,7 +134,6 @@ class PermissionResolver implements PermissionResolverInterface
         $this->permissionCache = [];
         $this->roleCache = [];
         $this->allPermissionsCache = [];
-        $this->permissionGroupsCache = [];
         $this->allRolesCache = [];
         $this->superAdminCache = [];
         $this->warmAttempts = [];
@@ -148,7 +145,6 @@ class PermissionResolver implements PermissionResolverInterface
             $this->permissionCache[$userId],
             $this->roleCache[$userId],
             $this->allPermissionsCache[$userId],
-            $this->permissionGroupsCache[$userId],
             $this->allRolesCache[$userId],
             $this->superAdminCache[$userId],
             $this->warmAttempts[$userId],
@@ -160,16 +156,22 @@ class PermissionResolver implements PermissionResolverInterface
         /** @var int $limit */
         $limit = config('permissions-redis.resolver_cache_limit', 1000);
 
-        if (count($this->permissionCache) <= $limit) {
+        $size = max(
+            count($this->permissionCache),
+            count($this->roleCache),
+            count($this->allPermissionsCache),
+            count($this->allRolesCache),
+        );
+
+        if ($size <= $limit) {
             return;
         }
 
-        $evictCount = (int) ($limit / 2);
+        $evictCount = $size - $limit;
 
         $this->permissionCache = array_slice($this->permissionCache, $evictCount, null, true);
         $this->roleCache = array_slice($this->roleCache, $evictCount, null, true);
         $this->allPermissionsCache = array_slice($this->allPermissionsCache, $evictCount, null, true);
-        $this->permissionGroupsCache = array_slice($this->permissionGroupsCache, $evictCount, null, true);
         $this->allRolesCache = array_slice($this->allRolesCache, $evictCount, null, true);
         $this->superAdminCache = array_slice($this->superAdminCache, $evictCount, null, true);
     }
@@ -192,7 +194,7 @@ class PermissionResolver implements PermissionResolverInterface
 
         $this->warmAttempts[$userId] = microtime(true);
 
-        $this->log("Auth cache miss for user {$userId}, warming from database.", 'warning');
+        $this->log("Auth cache miss for user {$userId}, warming from database.", 'debug');
         $this->cacheManager->warmUser($userId);
     }
 
@@ -243,7 +245,25 @@ class PermissionResolver implements PermissionResolverInterface
             return $guard;
         }
 
-        return auth()->getDefaultDriver();
+        return $this->defaultGuard();
+    }
+
+    private function defaultGuard(): string
+    {
+        try {
+            $driver = auth()->getDefaultDriver();
+
+            if ($driver !== '') {
+                return $driver;
+            }
+        } catch (Throwable) {
+            // Queue/console contexts may not have an auth manager bound.
+        }
+
+        /** @var string $fallback */
+        $fallback = config('auth.defaults.guard', 'web');
+
+        return $fallback;
     }
 
     private function wildcardEnabled(): bool
@@ -285,30 +305,9 @@ class PermissionResolver implements PermissionResolverInterface
             $this->permissionCache[$userId][$encoded] = true;
         }
 
+        $this->evictIfNeeded();
+
         return $names;
-    }
-
-    /**
-     * @param array<string> $encodedNames
-     *
-     * @return array<string, string|null>
-     */
-    private function loadPermissionGroups(int|string $userId, array $encodedNames): array
-    {
-        if (isset($this->permissionGroupsCache[$userId])) {
-            return $this->permissionGroupsCache[$userId];
-        }
-
-        if ($encodedNames === []) {
-            $this->permissionGroupsCache[$userId] = [];
-
-            return [];
-        }
-
-        $groups = $this->repository->getPermissionGroups($encodedNames);
-        $this->permissionGroupsCache[$userId] = $groups;
-
-        return $groups;
     }
 
     /** @return array<string> */
@@ -327,6 +326,8 @@ class PermissionResolver implements PermissionResolverInterface
             $this->roleCache[$userId][$encoded] = true;
         }
 
+        $this->evictIfNeeded();
+
         return $roles;
     }
 
@@ -341,6 +342,6 @@ class PermissionResolver implements PermissionResolverInterface
             return [$parts[0], $parts[1]];
         }
 
-        return [auth()->getDefaultDriver(), $parts[0]];
+        return [$this->defaultGuard(), $parts[0]];
     }
 }

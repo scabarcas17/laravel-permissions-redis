@@ -137,12 +137,14 @@ test('getAllPermissions populates individual permission cache', function () {
     expect($this->resolver->hasPermission(1, 'users.create'))->toBeTrue();
 });
 
-test('getAllPermissions uses in-memory cache on second call', function () {
+test('getAllPermissions uses in-memory cache for user permission names across calls', function () {
     $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
+    // User permission names are cached, so getUserPermissions is hit once.
     $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|users.create']);
+    // Group metadata is NOT cached per-user — refetched every call so cross-user group changes are visible.
     $this->repository->shouldReceive('getPermissionGroups')
         ->with(['web|users.create'])
-        ->once()
+        ->twice()
         ->andReturn(['web|users.create' => null]);
 
     $this->resolver->getAllPermissions(1);
@@ -158,9 +160,8 @@ test('getAllPermissions filters by guard when specified', function () {
         'api|users.create',
         'web|users.edit',
     ]);
-    // Groups fetched once for all encoded names (guard filter applies post-load)
     $this->repository->shouldReceive('getPermissionGroups')
-        ->once()
+        ->twice()
         ->andReturn([
             'web|users.create' => null,
             'api|users.create' => null,
@@ -350,8 +351,20 @@ test('wildcard does not match across guards', function () {
     $this->repository->shouldReceive('userHasPermission')->with(1, 'api|users.create')->once()->andReturn(false);
     $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|users.*']);
 
-    // users.* is in web guard, checking api guard — should not match
     expect($this->resolver->hasPermission(1, 'users.create', 'api'))->toBeFalse();
+});
+
+test('wildcard matches only the wildcard in the requested guard when both guards have wildcards', function () {
+    config()->set('permissions-redis.wildcard_permissions', true);
+
+    $this->repository->shouldReceive('userCacheExists')->with(1)->twice()->andReturn(true);
+    $this->repository->shouldReceive('userHasPermission')->with(1, 'api|users.create')->once()->andReturn(false);
+    $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn([
+        'web|users.*',
+        'api|users.*',
+    ]);
+
+    expect($this->resolver->hasPermission(1, 'users.create', 'api'))->toBeTrue();
 });
 
 // ─── flush ───
@@ -467,4 +480,66 @@ test('flush resets warm cooldown for all users', function () {
     $this->resolver->hasPermission(1, 'x');
     $this->resolver->flush();
     $this->resolver->hasPermission(1, 'x');
+});
+
+test('decodeEntry falls back to config auth.defaults.guard when auth manager is unavailable', function () {
+    config()->set('auth.defaults.guard', 'api');
+
+    $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
+    $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['legacy.permission']);
+    $this->repository->shouldReceive('getPermissionGroups')
+        ->with(['legacy.permission'])
+        ->once()
+        ->andReturn(['legacy.permission' => null]);
+
+    $permissions = $this->resolver->getAllPermissions(1);
+
+    expect($permissions->first()->guard)->toBe('api');
+});
+
+test('evictIfNeeded triggers when allPermissionsCache grows beyond limit even if permissionCache stays empty', function () {
+    config()->set('permissions-redis.resolver_cache_limit', 3);
+
+    for ($i = 1; $i <= 4; $i++) {
+        $this->repository->shouldReceive('userCacheExists')->with($i)->andReturn(true);
+        $this->repository->shouldReceive('getUserPermissions')->with($i)->andReturn(["web|perm.{$i}"]);
+        $this->repository->shouldReceive('getPermissionGroups')
+            ->with(["web|perm.{$i}"])
+            ->andReturn(["web|perm.{$i}" => null]);
+    }
+
+    $this->resolver->getAllPermissions(1);
+    $this->resolver->getAllPermissions(2);
+    $this->resolver->getAllPermissions(3);
+    $this->resolver->getAllPermissions(4);
+
+    $reflection = new ReflectionProperty($this->resolver, 'allPermissionsCache');
+    $reflection->setAccessible(true);
+    $cache = $reflection->getValue($this->resolver);
+
+    expect(count($cache))->toBeLessThanOrEqual(3)
+        ->and(array_key_exists(4, $cache))->toBeTrue()
+        ->and(array_key_exists(1, $cache))->toBeFalse();
+});
+
+test('getAllPermissions refetches groups on each call so cross-user group updates are visible', function () {
+    $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
+    $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|users.create']);
+
+    $this->repository->shouldReceive('getPermissionGroups')
+        ->with(['web|users.create'])
+        ->once()
+        ->andReturn(['web|users.create' => 'First Group']);
+
+    $first = $this->resolver->getAllPermissions(1);
+
+    $this->repository->shouldReceive('getPermissionGroups')
+        ->with(['web|users.create'])
+        ->once()
+        ->andReturn(['web|users.create' => 'Second Group']);
+
+    $second = $this->resolver->getAllPermissions(1);
+
+    expect($first->first()->group)->toBe('First Group')
+        ->and($second->first()->group)->toBe('Second Group');
 });
