@@ -215,9 +215,9 @@ test('deleteRoleCache deletes both permissions and users keys', function () {
 // ─── flushAll ───
 
 test('flushAll scans and deletes all keys with prefix', function () {
-    // First scan returns some keys and cursor '42'
-    $this->connection->shouldReceive('command')
-        ->with('scan', ['0', 'match', 'auth:*', 'count', 100])
+    $this->connection->shouldReceive('client')->andReturn(new stdClass());
+    $this->connection->shouldReceive('scan')
+        ->with('0', ['MATCH' => 'auth:*', 'COUNT' => 100])
         ->once()
         ->andReturn(['42', ['auth:user:1:permissions', 'auth:user:1:roles']]);
 
@@ -225,9 +225,8 @@ test('flushAll scans and deletes all keys with prefix', function () {
         ->with('del', ['auth:user:1:permissions', 'auth:user:1:roles'])
         ->once();
 
-    // Second scan returns empty and cursor '0' (done)
-    $this->connection->shouldReceive('command')
-        ->with('scan', ['42', 'match', 'auth:*', 'count', 100])
+    $this->connection->shouldReceive('scan')
+        ->with('42', ['MATCH' => 'auth:*', 'COUNT' => 100])
         ->once()
         ->andReturn(['0', []]);
 
@@ -235,12 +234,12 @@ test('flushAll scans and deletes all keys with prefix', function () {
 });
 
 test('flushAll handles empty scan result', function () {
-    $this->connection->shouldReceive('command')
-        ->with('scan', ['0', 'match', 'auth:*', 'count', 100])
+    $this->connection->shouldReceive('client')->andReturn(new stdClass());
+    $this->connection->shouldReceive('scan')
+        ->with('0', ['MATCH' => 'auth:*', 'COUNT' => 100])
         ->once()
         ->andReturn(['0', []]);
 
-    // DEL should NOT be called since there are no keys
     $this->connection->shouldNotReceive('command')->with('del', Mockery::any());
 
     $this->repository->flushAll();
@@ -334,13 +333,14 @@ test('replaceSetBatch returns early when sets is empty', function () {
 
 // ─── Permission groups ───
 
-test('setPermissionGroups stores non-null groups via HMSET', function () {
+test('setPermissionGroups stores non-null groups via HSET', function () {
     $this->connection->shouldReceive('command')->with('multi')->once();
     $this->connection->shouldReceive('command')
-        ->with('hmset', ['auth:permission_groups', [
-            'web|users.create' => 'User Management',
-            'web|posts.edit'   => 'Content',
-        ]])
+        ->with('hset', [
+            'auth:permission_groups',
+            'web|users.create', 'User Management',
+            'web|posts.edit', 'Content',
+        ])
         ->once();
     $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1]);
 
@@ -360,10 +360,10 @@ test('setPermissionGroups deletes fields with null group value via HDEL', functi
     $this->repository->setPermissionGroups(['web|users.create' => null]);
 });
 
-test('setPermissionGroups combines HMSET and HDEL in a single transaction', function () {
+test('setPermissionGroups combines HSET and HDEL in a single transaction', function () {
     $this->connection->shouldReceive('command')->with('multi')->once();
     $this->connection->shouldReceive('command')
-        ->with('hmset', ['auth:permission_groups', ['web|posts.edit' => 'Content']])
+        ->with('hset', ['auth:permission_groups', 'web|posts.edit', 'Content'])
         ->once();
     $this->connection->shouldReceive('command')
         ->with('hdel', ['auth:permission_groups', 'web|users.create'])
@@ -378,7 +378,7 @@ test('setPermissionGroups combines HMSET and HDEL in a single transaction', func
 
 test('setPermissionGroups throws TransactionFailedException when EXEC returns false', function () {
     $this->connection->shouldReceive('command')->with('multi')->once();
-    $this->connection->shouldReceive('command')->with('hmset', Mockery::any())->once();
+    $this->connection->shouldReceive('command')->with('hset', Mockery::any())->once();
     $this->connection->shouldReceive('command')->with('exec')->once()->andReturn(false);
 
     expect(fn () => $this->repository->setPermissionGroups(['web|x' => 'G']))
@@ -426,4 +426,47 @@ test('deletePermissionGroup removes single field via HDEL', function () {
         ->once();
 
     $this->repository->deletePermissionGroup('web|users.create');
+});
+
+// ─── replacePermissionGroups ───
+
+test('replacePermissionGroups atomically drops the hash then rewrites non-null entries', function () {
+    $this->connection->shouldReceive('command')->with('multi')->once();
+    $this->connection->shouldReceive('command')->with('del', ['auth:permission_groups'])->once();
+    $this->connection->shouldReceive('command')
+        ->with('hset', [
+            'auth:permission_groups',
+            'web|users.create', 'User Management',
+            'web|posts.edit', 'Content',
+        ])
+        ->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1, 1]);
+
+    $this->repository->replacePermissionGroups([
+        'web|users.create' => 'User Management',
+        'web|posts.edit'   => 'Content',
+        'web|ungrouped'    => null,
+        'web|empty'        => '',
+    ]);
+});
+
+test('replacePermissionGroups deletes the hash even when no groups remain', function () {
+    $this->connection->shouldReceive('command')->with('multi')->once();
+    $this->connection->shouldReceive('command')->with('del', ['auth:permission_groups'])->once();
+    $this->connection->shouldNotReceive('command')->with('hset', Mockery::any());
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn([1]);
+
+    $this->repository->replacePermissionGroups([
+        'web|ungrouped' => null,
+    ]);
+});
+
+test('replacePermissionGroups throws TransactionFailedException when EXEC returns false', function () {
+    $this->connection->shouldReceive('command')->with('multi')->once();
+    $this->connection->shouldReceive('command')->with('del', Mockery::any())->once();
+    $this->connection->shouldReceive('command')->with('hset', Mockery::any())->once();
+    $this->connection->shouldReceive('command')->with('exec')->once()->andReturn(false);
+
+    expect(fn () => $this->repository->replacePermissionGroups(['web|x' => 'G']))
+        ->toThrow(\Scabarcas\LaravelPermissionsRedis\Exceptions\TransactionFailedException::class);
 });

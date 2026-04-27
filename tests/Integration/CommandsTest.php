@@ -195,9 +195,9 @@ test('WarmAllCacheJob with flush=false calls rewarmAll', function () {
 test('permissions-redis:stats displays cache statistics', function () {
     $connection = Mockery::mock(\Illuminate\Redis\Connections\Connection::class);
 
-    // Scan returns some keys, then finishes
-    $connection->shouldReceive('command')
-        ->with('scan', ['0', 'match', 'auth:*', 'count', 100])
+    $connection->shouldReceive('client')->andReturn(new stdClass());
+    $connection->shouldReceive('scan')
+        ->with('0', ['MATCH' => 'auth:*', 'COUNT' => 100])
         ->once()
         ->andReturn(['0', [
             'auth:user:1:permissions',

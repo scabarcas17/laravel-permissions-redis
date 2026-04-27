@@ -6,11 +6,14 @@ namespace Scabarcas\LaravelPermissionsRedis\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Redis;
+use Scabarcas\LaravelPermissionsRedis\Cache\ScansRedisByPrefix;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Throwable;
 
 class CacheStatsCommand extends Command
 {
+    use ScansRedisByPrefix;
+
     protected $signature = 'permissions-redis:stats';
 
     protected $description = 'Display authorization cache statistics';
@@ -30,14 +33,8 @@ class CacheStatsCommand extends Command
         $userIds = [];
         $roleIds = [];
         $totalKeys = 0;
-        $cursor = '0';
 
-        do {
-            /** @var array{0: string, 1: array<string>} $result */
-            $result = $connection->command('scan', [$cursor, 'match', $prefix . '*', 'count', 100]);
-            $cursor = $result[0];
-            $keys = $result[1];
-
+        $this->scanByPattern($connection, $prefix . '*', function (array $keys) use ($prefix, &$userIds, &$roleIds, &$totalKeys): void {
             foreach ($keys as $key) {
                 $totalKeys++;
 
@@ -49,7 +46,7 @@ class CacheStatsCommand extends Command
                     $roleIds[$matches[1]] = true;
                 }
             }
-        } while ($cursor !== '0');
+        });
 
         /** @var int $ttl */
         $ttl = config('permissions-redis.ttl', 86400);

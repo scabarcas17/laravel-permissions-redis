@@ -61,6 +61,16 @@ interface PermissionRepositoryInterface
     public function setPermissionGroups(array $groups): void;
 
     /**
+     * Replace the entire permission groups hash atomically. Drops every
+     * existing entry and rewrites the hash with the provided map. Use this
+     * for full rebuilds (warmAll / rewarmAll) to prevent stale metadata
+     * from surviving when a permission's group changes or is removed.
+     *
+     * @param array<string, string|null> $groups
+     */
+    public function replacePermissionGroups(array $groups): void;
+
+    /**
      * Batch-fetch permission group metadata by encoded permission name.
      * Unknown keys return null.
      *

@@ -10,6 +10,8 @@ use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 
 class TenantAwareRedisPermissionRepository implements PermissionRepositoryInterface
 {
+    use ScansRedisByPrefix;
+
     /** @var Closure(): (string|int|null) */
     private Closure $tenantResolver;
 
@@ -112,18 +114,10 @@ class TenantAwareRedisPermissionRepository implements PermissionRepositoryInterf
         /** @var string $prefix */
         $prefix = config('permissions-redis.prefix', 'auth:');
         $pattern = $prefix . '*:t:' . $tenantId . ':*';
-        $cursor = '0';
 
-        do {
-            /** @var array{0: string, 1: array<string>} $result */
-            $result = $connection->command('scan', [$cursor, 'match', $pattern, 'count', 100]);
-            $cursor = $result[0];
-            $keys = $result[1];
-
-            if ($keys !== []) {
-                $connection->command('del', $keys);
-            }
-        } while ($cursor !== '0');
+        $this->scanByPattern($connection, $pattern, function (array $keys) use ($connection): void {
+            $connection->command('del', $keys);
+        });
     }
 
     /**
@@ -151,6 +145,12 @@ class TenantAwareRedisPermissionRepository implements PermissionRepositoryInterf
     public function deletePermissionGroup(string $encodedName): void
     {
         $this->inner->deletePermissionGroup($encodedName);
+    }
+
+    /** @param array<string, string|null> $groups */
+    public function replacePermissionGroups(array $groups): void
+    {
+        $this->inner->replacePermissionGroups($groups);
     }
 
     /** @param array<string, array<string>> $sets */

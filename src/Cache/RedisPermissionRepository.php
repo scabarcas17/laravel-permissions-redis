@@ -12,6 +12,8 @@ use Throwable;
 
 class RedisPermissionRepository implements PermissionRepositoryInterface
 {
+    use ScansRedisByPrefix;
+
     /**
      * Sentinel value stored in empty Redis sets so that key existence
      * reflects "cache populated" rather than "no data". The null bytes make
@@ -190,19 +192,10 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     public function flushAll(): void
     {
         $connection = $this->connection();
-        $prefix = $this->prefix();
-        $cursor = '0';
 
-        do {
-            /** @var array{0: string, 1: array<string>} $result */
-            $result = $connection->command('scan', [$cursor, 'match', $prefix . '*', 'count', 100]);
-            $cursor = $result[0];
-            $keys = $result[1];
-
-            if ($keys !== []) {
-                $connection->command('del', $keys);
-            }
-        } while ($cursor !== '0');
+        $this->scanByPattern($connection, $this->prefix() . '*', function (array $keys) use ($connection): void {
+            $connection->command('del', $keys);
+        });
     }
 
     /**
@@ -233,7 +226,9 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         $connection->command('multi');
 
         if ($setValues !== []) {
-            $connection->command('hmset', [$key, $setValues]);
+            // HMSET is deprecated; HSET accepts multi-field since Redis 4.0.
+            // Flatten field/value pairs so predis can serialize them.
+            $connection->command('hset', [$key, ...$this->flattenHashPairs($setValues)]);
         }
 
         if ($deleteFields !== []) {
@@ -285,6 +280,38 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     }
 
     /**
+     * @param array<string, string|null> $groups
+     *
+     * @throws Throwable
+     */
+    public function replacePermissionGroups(array $groups): void
+    {
+        $connection = $this->connection();
+        $key = $this->permissionGroupsKey();
+
+        $setValues = [];
+
+        foreach ($groups as $encodedName => $group) {
+            if (is_string($group) && $group !== '') {
+                $setValues[$encodedName] = $group;
+            }
+        }
+
+        $connection->command('multi');
+        $connection->command('del', [$key]);
+
+        if ($setValues !== []) {
+            $connection->command('hset', [$key, ...$this->flattenHashPairs($setValues)]);
+        }
+
+        $result = $connection->command('exec');
+
+        if (!is_array($result)) {
+            throw TransactionFailedException::forKey($key);
+        }
+    }
+
+    /**
      * @param array<string, array<string>> $sets
      *
      * @throws Throwable
@@ -319,6 +346,23 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         if (!is_array($result)) {
             throw TransactionFailedException::forBatch(count($sets));
         }
+    }
+
+    /**
+     * @param array<string, string> $pairs
+     *
+     * @return array<int, string>
+     */
+    private function flattenHashPairs(array $pairs): array
+    {
+        $flat = [];
+
+        foreach ($pairs as $field => $value) {
+            $flat[] = (string) $field;
+            $flat[] = $value;
+        }
+
+        return $flat;
     }
 
     /** @param array<string> $members

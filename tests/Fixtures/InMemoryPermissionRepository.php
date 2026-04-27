@@ -137,6 +137,18 @@ class InMemoryPermissionRepository implements PermissionRepositoryInterface
         unset($this->permissionGroups[$encodedName]);
     }
 
+    /** @param array<string, string|null> $groups */
+    public function replacePermissionGroups(array $groups): void
+    {
+        $this->permissionGroups = [];
+
+        foreach ($groups as $encodedName => $group) {
+            if (is_string($group) && $group !== '') {
+                $this->permissionGroups[$encodedName] = $group;
+            }
+        }
+    }
+
     /** @param array<string, array<string>> $sets */
     public function replaceSetBatch(array $sets): void
     {
