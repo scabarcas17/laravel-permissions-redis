@@ -121,29 +121,25 @@ test('warmAll processes all roles and users', function () {
         ->and($this->repo->getUserRoles($user2->id))->toContain('web|admin');
 });
 
-test('warmAll does not flush before warming to avoid downtime', function () {
+test('warmAll flushes stale data before warming', function () {
     $data = seedDbData();
 
     $this->repo->setUserPermissions(999, ['stale.data']);
 
     $this->manager->warmAll();
 
-    // Stale data for orphan users persists (expires via TTL) — no downtime window
-    expect($this->repo->getUserPermissions(999))->toContain('stale.data')
-        // Active users are still warmed correctly
+    expect($this->repo->getUserPermissions(999))->toBe([])
         ->and($this->repo->getUserPermissions($data['user']->id))->toContain('web|users.create');
 });
 
-test('rewarmAll warms without flushing', function () {
+test('rewarmAll preserves stale data (no flush)', function () {
     $data = seedDbData();
 
     $this->repo->setUserPermissions(999, ['stale.data']);
 
     $this->manager->rewarmAll();
 
-    // Stale data should still exist (no flush)
     expect($this->repo->getUserPermissions(999))->toContain('stale.data')
-        // But real users should be warmed
         ->and($this->repo->getUserPermissions($data['user']->id))->toContain('web|users.create');
 });
 
@@ -304,4 +300,96 @@ test('getUserIdsAffectedByPermission includes users from all configured models',
 
     expect($affected)->toContain($regularUser->id)
         ->and($affected)->toContain($adminUser->id);
+});
+
+test('warmPermissionGroups removes entries for permissions that no longer exist', function () {
+    $this->repo->replacePermissionGroups([
+        'web|users.create' => 'User Management',
+        'web|posts.delete' => 'Content',
+    ]);
+
+    DB::table('permissions')->insert([
+        ['name' => 'users.create', 'guard_name' => 'web', 'group' => 'User Management'],
+    ]);
+
+    $this->manager->warmPermissionGroups();
+
+    expect($this->repo->getPermissionGroups(['web|users.create', 'web|posts.delete']))
+        ->toBe([
+            'web|users.create' => 'User Management',
+            'web|posts.delete' => null,
+        ]);
+});
+
+test('warmPermissionGroups clears group when permission had its group removed', function () {
+    $this->repo->replacePermissionGroups([
+        'web|users.create' => 'User Management',
+    ]);
+
+    DB::table('permissions')->insert([
+        ['name' => 'users.create', 'guard_name' => 'web', 'group' => null],
+    ]);
+
+    $this->manager->warmPermissionGroups();
+
+    expect($this->repo->getPermissionGroups(['web|users.create']))
+        ->toBe(['web|users.create' => null]);
+});
+
+test('warmUser writes permissions and roles in a single replaceSetBatch call', function () {
+    $mock = Mockery::mock(PermissionRepositoryInterface::class);
+    $manager = new AuthorizationCacheManager($mock);
+
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+    $roleId = DB::table('roles')->insertGetId(['name' => 'admin', 'guard_name' => 'web']);
+    $permId = DB::table('permissions')->insertGetId(['name' => 'users.create', 'guard_name' => 'web']);
+    DB::table('role_has_permissions')->insert(['role_id' => $roleId, 'permission_id' => $permId]);
+    DB::table('model_has_roles')->insert([
+        'role_id' => $roleId, 'model_id' => $user->id, 'model_type' => User::class,
+    ]);
+
+    $mock->shouldReceive('replaceSetBatch')
+        ->once()
+        ->with(Mockery::on(function ($batch) use ($user): bool {
+            return is_array($batch)
+                && array_keys($batch) === [
+                    "user:{$user->id}:permissions",
+                    "user:{$user->id}:roles",
+                ]
+                && in_array('web|users.create', $batch["user:{$user->id}:permissions"], true)
+                && in_array('web|admin', $batch["user:{$user->id}:roles"], true);
+        }));
+    $mock->shouldNotReceive('setUserPermissions');
+    $mock->shouldNotReceive('setUserRoles');
+
+    $manager->warmUser($user->id);
+});
+
+test('warmRole writes permissions and users in a single replaceSetBatch call', function () {
+    $mock = Mockery::mock(PermissionRepositoryInterface::class);
+    $manager = new AuthorizationCacheManager($mock);
+
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+    $roleId = DB::table('roles')->insertGetId(['name' => 'admin', 'guard_name' => 'web']);
+    $permId = DB::table('permissions')->insertGetId(['name' => 'users.create', 'guard_name' => 'web']);
+    DB::table('role_has_permissions')->insert(['role_id' => $roleId, 'permission_id' => $permId]);
+    DB::table('model_has_roles')->insert([
+        'role_id' => $roleId, 'model_id' => $user->id, 'model_type' => User::class,
+    ]);
+
+    $mock->shouldReceive('replaceSetBatch')
+        ->once()
+        ->with(Mockery::on(function ($batch) use ($roleId, $user): bool {
+            return is_array($batch)
+                && array_keys($batch) === [
+                    "role:{$roleId}:permissions",
+                    "role:{$roleId}:users",
+                ]
+                && in_array('web|users.create', $batch["role:{$roleId}:permissions"], true)
+                && in_array((string) $user->id, $batch["role:{$roleId}:users"], true);
+        }));
+    $mock->shouldNotReceive('setRolePermissions');
+    $mock->shouldNotReceive('setRoleUsers');
+
+    $manager->warmRole($roleId);
 });

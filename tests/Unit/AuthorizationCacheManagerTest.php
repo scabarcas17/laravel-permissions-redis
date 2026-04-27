@@ -21,3 +21,29 @@ test('evictRole delegates to repository deleteRoleCache', function () {
 
     $this->manager->evictRole(3);
 });
+
+test('warmAll invokes flushAll before any other repository call', function () {
+    $callOrder = [];
+
+    $this->repository->shouldReceive('flushAll')->once()->andReturnUsing(function () use (&$callOrder) {
+        $callOrder[] = 'flushAll';
+    });
+    $this->repository->shouldReceive('replaceSetBatch')->zeroOrMoreTimes()->andReturnUsing(function () use (&$callOrder) {
+        $callOrder[] = 'replaceSetBatch';
+    });
+    $this->repository->shouldReceive('replacePermissionGroups')->zeroOrMoreTimes()->andReturnUsing(function () use (&$callOrder) {
+        $callOrder[] = 'replacePermissionGroups';
+    });
+
+    $this->manager->warmAll();
+
+    expect($callOrder[0] ?? null)->toBe('flushAll');
+});
+
+test('rewarmAll never invokes flushAll', function () {
+    $this->repository->shouldNotReceive('flushAll');
+    $this->repository->shouldReceive('replaceSetBatch')->zeroOrMoreTimes();
+    $this->repository->shouldReceive('replacePermissionGroups')->zeroOrMoreTimes();
+
+    $this->manager->rewarmAll();
+});

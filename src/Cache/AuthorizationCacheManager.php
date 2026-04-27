@@ -20,15 +20,19 @@ class AuthorizationCacheManager
     ) {
     }
 
+    /** Flushes before warming. Use rewarmAll() to avoid the downtime window. */
     public function warmAll(): void
     {
+        $this->repository->flushAll();
+
         $this->warmAllRoles();
         $this->warmAllUsers();
         $this->warmPermissionGroups();
 
-        $this->log('Full authorization cache warm completed.');
+        $this->log('Full authorization cache warm completed (flushed first).');
     }
 
+    /** No flush: stale keys from removed entities persist until their TTL expires. */
     public function rewarmAll(): void
     {
         $this->warmAllRoles();
@@ -38,10 +42,6 @@ class AuthorizationCacheManager
         $this->log('Cache rewarm completed (no flush).');
     }
 
-    /**
-     * Populate the permission_groups hash from the permissions table. Keys are
-     * encoded as "{guard}|{name}" (matching the encoding used by set members).
-     */
     public function warmPermissionGroups(): void
     {
         $batch = [];
@@ -55,19 +55,11 @@ class AuthorizationCacheManager
                     $name = is_string($permission->name) ? $permission->name : '';
                     $group = is_string($permission->group) && $permission->group !== '' ? $permission->group : null;
 
-                    if ($group === null) {
-                        continue;
-                    }
-
                     $batch["{$guard}|{$name}"] = $group;
                 }
             });
 
-        if ($batch === []) {
-            return;
-        }
-
-        $this->repository->setPermissionGroups($batch);
+        $this->repository->replacePermissionGroups($batch);
     }
 
     public function warmUser(int|string $userId): void
@@ -75,17 +67,21 @@ class AuthorizationCacheManager
         $permissions = $this->computeUserPermissions($userId);
         $roles = $this->getUserRoleNames($userId);
 
-        $this->repository->setUserPermissions($userId, $permissions);
-        $this->repository->setUserRoles($userId, $roles);
+        $this->repository->replaceSetBatch([
+            "user:{$userId}:permissions" => $permissions,
+            "user:{$userId}:roles"       => $roles,
+        ]);
     }
 
     public function warmRole(int $roleId): void
     {
         $permissions = $this->getRolePermissionNames($roleId);
-        $this->repository->setRolePermissions($roleId, $permissions);
-
         $userIds = $this->getRoleUserIdsFromDb($roleId);
-        $this->repository->setRoleUsers($roleId, $userIds);
+
+        $this->repository->replaceSetBatch([
+            "role:{$roleId}:permissions" => $permissions,
+            "role:{$roleId}:users"       => array_map('strval', $userIds),
+        ]);
     }
 
     public function warmPermissionAffectedUsers(int $permissionId): void

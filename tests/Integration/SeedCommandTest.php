@@ -222,3 +222,39 @@ test('seed command warms cache by default', function () {
         ->expectsOutputToContain('Cache warmed in')
         ->assertSuccessful();
 });
+
+test('seed command --fresh flushes Redis so removed permissions leave no stale group metadata', function () {
+    $this->repo->setUserPermissions(1, ['web|legacy.permission']);
+    $this->repo->setUserRoles(1, ['web|legacy-role']);
+    $this->repo->setRolePermissions(42, ['web|legacy.permission']);
+    $this->repo->setRoleUsers(42, [1]);
+    $this->repo->replacePermissionGroups([
+        'web|legacy.permission' => 'Legacy Group',
+    ]);
+
+    Permission::create(['name' => 'old.permission', 'guard_name' => 'web', 'group' => 'Old']);
+    Role::findOrCreate('old-role');
+
+    config()->set('permissions-redis.seed', [
+        'roles' => [
+            'admin' => ['users.create'],
+        ],
+    ]);
+
+    $this->artisan('permissions-redis:seed --fresh')
+        ->expectsOutputToContain('Deleting all existing')
+        ->expectsOutputToContain('Seeded 1 permissions and 1 roles')
+        ->assertSuccessful();
+
+    $this->assertDatabaseMissing('permissions', ['name' => 'old.permission']);
+    $this->assertDatabaseMissing('roles', ['name' => 'old-role']);
+
+    expect($this->repo->getUserPermissions(1))->toBe([])
+        ->and($this->repo->getUserRoles(1))->toBe([])
+        ->and($this->repo->getRoleUserIds(42))->toBe([])
+        ->and($this->repo->getPermissionGroups(['web|legacy.permission']))
+            ->toBe(['web|legacy.permission' => null]);
+
+    $this->assertDatabaseHas('permissions', ['name' => 'users.create']);
+    $this->assertDatabaseHas('roles', ['name' => 'admin']);
+});

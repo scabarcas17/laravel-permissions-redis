@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Scabarcas\LaravelPermissionsRedis\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Models\Permission;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
 
@@ -92,20 +94,24 @@ class SeedCommand extends Command
     {
         $this->warn('Deleting all existing permissions and roles...');
 
-        /** @var string $rolesTable */
-        $rolesTable = config('permissions-redis.tables.model_has_roles', 'model_has_roles');
-        /** @var string $permissionsTable */
-        $permissionsTable = config('permissions-redis.tables.model_has_permissions', 'model_has_permissions');
-        /** @var string $rolePermissionsTable */
-        $rolePermissionsTable = config('permissions-redis.tables.role_has_permissions', 'role_has_permissions');
+        /** @var string $modelHasRoles */
+        $modelHasRoles = config('permissions-redis.tables.model_has_roles', 'model_has_roles');
+        /** @var string $modelHasPermissions */
+        $modelHasPermissions = config('permissions-redis.tables.model_has_permissions', 'model_has_permissions');
+        /** @var string $roleHasPermissions */
+        $roleHasPermissions = config('permissions-redis.tables.role_has_permissions', 'role_has_permissions');
 
-        // Delete pivots first to avoid FK violations
-        \Illuminate\Support\Facades\DB::table($rolesTable)->delete();
-        \Illuminate\Support\Facades\DB::table($permissionsTable)->delete();
-        \Illuminate\Support\Facades\DB::table($rolePermissionsTable)->delete();
+        // Pivots first: FK cascade order.
+        DB::table($modelHasRoles)->delete();
+        DB::table($modelHasPermissions)->delete();
+        DB::table($roleHasPermissions)->delete();
 
-        Role::query()->delete();
-        Permission::query()->delete();
+        Role::withoutEvents(fn () => Role::query()->delete());
+        Permission::withoutEvents(fn () => Permission::query()->delete());
+
+        /** @var PermissionRepositoryInterface $repository */
+        $repository = app(PermissionRepositoryInterface::class);
+        $repository->flushAll();
 
         $this->line('  All existing data deleted.');
     }
