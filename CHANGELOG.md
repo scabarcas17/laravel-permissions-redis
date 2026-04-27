@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [4.0.0-beta.2] - 2026-04-22
+## [4.0.0-beta.2] - 2026-04-27
 
 Maintenance release of the 4.x beta. Fixes all issues surfaced by a deep audit
 of beta.1 — data-consistency bugs, atomicity gaps, and cross-implementation
