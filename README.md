@@ -1327,17 +1327,25 @@ $this->app->singleton(
 
 ### Performance Benchmark
 
-We provide a [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) that compares both packages side by side under identical conditions.
+We provide a [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) that compares both packages side by side under identical conditions. Numbers below come from `php artisan bench:markdown --warm=5 --runs=30` against `v4.0.0-beta.2` on SQLite + Redis (Apple Silicon, PHP 8.4, predis). Methodology: 5 warm-up + 30 measurement runs per strategy, GC reset before each run, percentiles reported across the measurement set. See the bench README for full methodology and how to reproduce.
 
 #### Database queries per request
 
 | Scenario | spatie/laravel-permission | laravel-permissions-redis | Reduction |
 |----------|:------------------------:|:-------------------------:|:---------:|
-| 1 iteration (33 checks) | 5 DB queries | 1 DB query | **80%** |
-| 10 iterations | 14 DB queries | 10 DB queries | **~29%** |
-| 50 iterations | 54 DB queries | 50 DB queries | **~7%** |
+| 1 iteration (33 checks) | 4 DB queries | 1 DB query | **75%** |
+| 10 iterations | 40 DB queries | 10 DB queries | **75%** |
+| 50 iterations | 200 DB queries | 50 DB queries | **75%** |
 
-> After the initial cache warm, all permission and role checks are resolved entirely from Redis with **zero additional database queries**.
+#### Wall-clock time per request (median, p50)
+
+| Scenario | spatie/laravel-permission | laravel-permissions-redis | Speedup |
+|----------|:------------------------:|:-------------------------:|:-------:|
+| 1 iteration (33 checks) | 13.76 ms | 1.26 ms | **10.94x faster** |
+| 10 iterations | 138.87 ms | 13.01 ms | **10.68x faster** |
+| 50 iterations | 696.73 ms | 63.79 ms | **10.92x faster** |
+
+> Spatie caches the *global* permission/role registry, but each `User::find()` still triggers Eloquent's lazy-loading of the user's role and permission relations — exactly 4 DB queries per authorization-heavy request. The Redis package keeps the full user→roles→permissions mapping in Redis, leaving only the `SELECT * FROM users` lookup. The speedup holds at **~10-11x median** across all iteration counts because both strategies scale linearly — the *constant* per iteration is what differs (4 DB queries vs 1 Redis lookup).
 
 #### How the caching differs
 
