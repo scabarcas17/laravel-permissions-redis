@@ -1327,7 +1327,7 @@ $this->app->singleton(
 
 ### Performance Benchmark
 
-We provide a [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) that compares both packages side by side under identical conditions. Numbers below come from `php artisan bench:markdown --warm=5 --runs=30` against `v4.0.0-beta.2` on SQLite + Redis (Apple Silicon, PHP 8.4, predis). Methodology: 5 warm-up + 30 measurement runs per strategy, GC reset before each run, percentiles reported across the measurement set. See the bench README for full methodology and how to reproduce.
+We provide a [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) that compares both packages side by side under identical conditions. Numbers below come from `php artisan bench:markdown --warm=5 --runs=30` against `v4.0.0` on SQLite + Redis (Apple Silicon, PHP 8.4, predis). Methodology: 5 warm-up + 30 measurement runs per strategy, GC reset before each run, percentiles reported across the measurement set. See the bench README for full methodology and how to reproduce.
 
 #### Database queries per request
 

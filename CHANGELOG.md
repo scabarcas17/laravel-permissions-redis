@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] - 2026-05-14
+
+Stable release of the 4.x line. No code changes since `v4.0.0-beta.2`; three
+weeks of internal production usage without surfacing new bugs validated the
+public API as stable.
+
+### Notes
+
+- The benchmark numbers in the README and the
+  [benchmark repository](https://github.com/scabarcas17/laravel-permissions-redis-benchmark)
+  apply unchanged to `v4.0.0` because no runtime code changed between
+  `v4.0.0-beta.2` and this release.
+- Semantic versioning from this point forward: breaking changes will only ship
+  in `v5.0.0`. The 4.x line will receive non-breaking features and bug fixes
+  only.
+
 ## [4.0.0-beta.2] - 2026-04-27
 
 Maintenance release of the 4.x beta. Fixes all issues surfaced by a deep audit
