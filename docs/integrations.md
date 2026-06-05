@@ -14,14 +14,14 @@ This guide shows how to combine `laravel-permissions-redis` with other Laravel p
 
 ## Laravel Policies
 
-Laravel Policies work seamlessly with this package thanks to the Gate integration. When `register_gate` is enabled (default), `$user->can('ability')` resolves through Redis automatically.
+Laravel Policies work with this package through the Gate integration. When `register_gate` is enabled (default), `$user->can('ability')` resolves through Redis automatically.
 
 ### How it works
 
 1. You call `$user->can('posts.edit')` or `$this->authorize('posts.edit')` in a controller
 2. Laravel's Gate fires a `before` callback registered by this package
 3. The callback checks Redis via `PermissionResolver::hasPermission()`
-4. If the user has the permission, the Gate returns `true` — the Policy method is never called
+4. If the user has the permission, the Gate returns `true`. The Policy method is never called.
 5. If the user does **not** have the permission, the Gate falls through to the Policy method
 
 This means you can use **both** Redis-backed permissions and Policies. Redis permissions act as a fast-pass: if the permission exists, it's granted immediately. If not, the Policy gets a chance to decide.
@@ -59,7 +59,7 @@ class PostPolicy
 
     /**
      * Gate::before checks 'posts.delete' first.
-     * No fallback — only users with explicit permission can delete.
+     * No fallback, only users with explicit permission can delete.
      */
     public function delete(User $user, Post $post): bool
     {
@@ -160,7 +160,7 @@ class PostPolicyTest extends TestCase
         $user = User::factory()->create();
         $post = Post::factory()->for($user)->create();
 
-        // No Redis permission — Policy fallback allows own posts
+        // No Redis permission, Policy fallback allows own posts
         $this->actingAs($user)
             ->get("/posts/{$post->id}/edit")
             ->assertOk();
@@ -171,7 +171,7 @@ class PostPolicyTest extends TestCase
         $user = User::factory()->create();
         $post = Post::factory()->create(); // belongs to another user
 
-        // No Redis permission + not the owner → denied
+        // No Redis permission + not the owner, so denied
         $this->actingAs($user)
             ->get("/posts/{$post->id}/edit")
             ->assertForbidden();
@@ -213,8 +213,8 @@ When building APIs with [Sanctum](https://laravel.com/docs/sanctum) or [Passport
 
 The recommended pattern is to check both layers:
 
-1. **Token layer** — Does this API token have the ability to perform this action?
-2. **User layer** — Does the user behind this token have the permission?
+1. **Token layer.** Does this API token have the ability to perform this action?
+2. **User layer.** Does the user behind this token have the permission?
 
 ```php
 // routes/api.php
@@ -242,7 +242,7 @@ class PostController extends Controller
             abort(403, 'Token does not have the posts:create ability.');
         }
 
-        // 2. Check user permission (Redis) — already handled by middleware
+        // 2. Check user permission (Redis), already handled by middleware
         //    or check manually:
         if (!$request->user()->hasPermissionTo('posts.create')) {
             abort(403, 'User does not have the posts.create permission.');

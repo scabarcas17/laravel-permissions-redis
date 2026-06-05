@@ -31,7 +31,7 @@ class MigrateFromSpatieCommand extends Command
         $this->dryRun = (bool) $this->option('dry-run');
 
         if ($this->dryRun) {
-            $this->warn('DRY RUN — no changes will be made.');
+            $this->warn('DRY RUN (no changes will be made).');
             $this->newLine();
         }
 
@@ -57,10 +57,10 @@ class MigrateFromSpatieCommand extends Command
         $tablesAreSame = $this->tablesAreSame();
 
         if ($tablesAreSame) {
-            $this->info('Tables are the same — reusing existing data.');
+            $this->info('Tables are the same, reusing existing data.');
             $this->ensureSchemaCompatibility();
         } else {
-            $this->info('Tables differ — copying data from Spatie tables...');
+            $this->info('Tables differ, copying data from Spatie tables...');
 
             if (!$this->ensureTargetTablesExist()) {
                 return self::FAILURE;

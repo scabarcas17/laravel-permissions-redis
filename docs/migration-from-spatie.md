@@ -7,16 +7,16 @@ This guide walks you through replacing `spatie/laravel-permission` with `scabarc
 ## Table of Contents
 
 - [Overview](#overview)
-- [Step 1 — Install the package](#step-1--install-the-package)
-- [Step 2 — Publish config and migrations](#step-2--publish-config-and-migrations)
-- [Step 3 — Run the migration command](#step-3--run-the-migration-command)
-- [Step 4 — Update the User model](#step-4--update-the-user-model)
-- [Step 5 — Update imports](#step-5--update-imports)
-- [Step 6 — Update config references](#step-6--update-config-references)
-- [Step 7 — Update Blade directives](#step-7--update-blade-directives)
-- [Step 8 — Update middleware references](#step-8--update-middleware-references)
-- [Step 9 — Remove Spatie](#step-9--remove-spatie)
-- [Step 10 — Warm the cache](#step-10--warm-the-cache)
+- [Step 1: Install the package](#step-1-install-the-package)
+- [Step 2: Publish config and migrations](#step-2-publish-config-and-migrations)
+- [Step 3: Run the migration command](#step-3-run-the-migration-command)
+- [Step 4: Update the User model](#step-4-update-the-user-model)
+- [Step 5: Update imports](#step-5-update-imports)
+- [Step 6: Update config references](#step-6-update-config-references)
+- [Step 7: Update Blade directives](#step-7-update-blade-directives)
+- [Step 8: Update middleware references](#step-8-update-middleware-references)
+- [Step 9: Remove Spatie](#step-9-remove-spatie)
+- [Step 10: Warm the cache](#step-10-warm-the-cache)
 - [Method equivalence table](#method-equivalence-table)
 - [Behavior differences](#behavior-differences)
 - [Config mapping](#config-mapping)
@@ -39,7 +39,7 @@ Both packages share the same database schema (5 tables) and a very similar API. 
 
 ---
 
-## Step 1 — Install the package
+## Step 1: Install the package
 
 Install alongside Spatie first (both can coexist temporarily):
 
@@ -49,7 +49,7 @@ composer require scabarcas/laravel-permissions-redis
 
 ---
 
-## Step 2 — Publish config and migrations
+## Step 2: Publish config and migrations
 
 ```bash
 php artisan vendor:publish --provider="Scabarcas\LaravelPermissionsRedis\PermissionsRedisServiceProvider"
@@ -57,7 +57,7 @@ php artisan vendor:publish --provider="Scabarcas\LaravelPermissionsRedis\Permiss
 
 This creates `config/permissions-redis.php` and the migration files.
 
-**Important:** If you are using the **same table names** as Spatie (the defaults: `permissions`, `roles`, `model_has_permissions`, `model_has_roles`, `role_has_permissions`), do **not** run `php artisan migrate` yet — the tables already exist. The migration command in Step 3 handles this for you.
+**Important:** If you are using the **same table names** as Spatie (the defaults: `permissions`, `roles`, `model_has_permissions`, `model_has_roles`, `role_has_permissions`), do **not** run `php artisan migrate` yet. The tables already exist, and the migration command in Step 3 handles this for you.
 
 If you want **different table names**, update `config/permissions-redis.php` first:
 
@@ -75,7 +75,7 @@ Then run `php artisan migrate` to create the new tables.
 
 ---
 
-## Step 3 — Run the migration command
+## Step 3: Run the migration command
 
 ```bash
 php artisan permissions-redis:migrate-from-spatie
@@ -102,7 +102,7 @@ This command:
 Detecting Spatie configuration...
   Spatie tables: permissions, roles, model_has_permissions, model_has_roles, role_has_permissions
   Target tables: permissions, roles, model_has_permissions, model_has_roles, role_has_permissions
-  Tables are the same — reusing existing data.
+  Tables are the same, reusing existing data.
 
 Ensuring schema compatibility...
   Added 'description' column to permissions table.
@@ -117,7 +117,7 @@ Migration complete! 12 permissions, 4 roles, 3 users migrated.
 
 ---
 
-## Step 4 — Update the User model
+## Step 4: Update the User model
 
 Replace the Spatie trait with the Redis-backed trait:
 
@@ -137,7 +137,7 @@ Replace the Spatie trait with the Redis-backed trait:
 
 ---
 
-## Step 5 — Update imports
+## Step 5: Update imports
 
 Replace Spatie namespaces throughout your codebase:
 
@@ -168,7 +168,7 @@ grep -rl "Spatie\\\\Permission\\\\Exceptions" app/ --include="*.php" | xargs sed
 
 ---
 
-## Step 6 — Update config references
+## Step 6: Update config references
 
 If your code references Spatie config values, update them:
 
@@ -183,7 +183,7 @@ If your code references Spatie config values, update them:
 
 ---
 
-## Step 7 — Update Blade directives
+## Step 7: Update Blade directives
 
 Most Blade directives work identically. Key differences:
 
@@ -195,11 +195,11 @@ Most Blade directives work identically. Key differences:
 | `@hasallroles('a\|b')` | `@hasallroles('a\|b')` | Identical |
 | `@unlessrole('admin')` | `@role('admin') @else` | Use `@else` block instead |
 | `@can('perm')` | `@can('perm')` | Identical (Gate integration) |
-| — | `@permission('perm')` | **New:** direct permission check |
-| — | `@hasanypermission('a\|b')` | **New:** any permission check |
-| — | `@hasallpermissions('a\|b')` | **New:** all permissions check |
+| N/A | `@permission('perm')` | **New:** direct permission check |
+| N/A | `@hasanypermission('a\|b')` | **New:** any permission check |
+| N/A | `@hasallpermissions('a\|b')` | **New:** all permissions check |
 
-**Search for `@hasrole` and `@unlessrole`** in your Blade templates — these are the only directives that need changes:
+**Search for `@hasrole` and `@unlessrole`** in your Blade templates, as these are the only directives that need changes:
 
 ```bash
 grep -rn "@hasrole\|@endhasrole\|@unlessrole\|@endunlessrole" resources/views/
@@ -225,7 +225,7 @@ Replace `@hasrole` with `@role` and convert `@unlessrole` patterns:
 
 ---
 
-## Step 8 — Update middleware references
+## Step 8: Update middleware references
 
 The middleware aliases are the same (`permission`, `role`, `role_or_permission`), so **route files require no changes** if you use string aliases:
 
@@ -247,7 +247,7 @@ If you reference Spatie middleware classes directly in `bootstrap/app.php` or a 
 
 ---
 
-## Step 9 — Remove Spatie
+## Step 9: Remove Spatie
 
 Once everything is working:
 
@@ -263,7 +263,7 @@ rm config/permission.php
 
 ---
 
-## Step 10 — Warm the cache
+## Step 10: Warm the cache
 
 If you didn't use `--no-warm` in Step 3, the cache is already warm. Otherwise:
 
@@ -300,15 +300,15 @@ php artisan permissions-redis:stats
 | `hasAllPermissions(...)` | `hasAllPermissions(...)` | Identical |
 | `getAllPermissions()` | `getAllPermissions()` | Returns `Collection<PermissionDTO>` instead of Eloquent Collection |
 | `getPermissionNames()` | `getPermissionNames()` | Identical |
-| `getDirectPermissions()` | — | Not available (all permissions are merged) |
-| `getPermissionsViaRoles()` | — | Not available |
-| `hasDirectPermission(...)` | — | Not available |
-| `hasPermissionViaRole(...)` | — | Not available |
+| `getDirectPermissions()` | N/A | Not available (all permissions are merged) |
+| `getPermissionsViaRoles()` | N/A | Not available |
+| `hasDirectPermission(...)` | N/A | Not available |
+| `hasPermissionViaRole(...)` | N/A | Not available |
 | `roles()` | `roles()` | Identical (BelongsToMany) |
 | `permissions()` | `permissions()` | Identical (BelongsToMany) |
 | `scopeRole(...)` | `scopeRole(...)` | Identical |
 | `scopePermission(...)` | `scopePermission(...)` | Identical |
-| — | `forGuard('api')` | **New:** fluent guard scoping |
+| N/A | `forGuard('api')` | **New:** fluent guard scoping |
 
 ### Role model methods
 
@@ -325,11 +325,11 @@ php artisan permissions-redis:stats
 | Spatie | This package | Notes |
 |--------|-------------|-------|
 | `permission:cache-reset` | `permissions-redis:flush` | Flush cache |
-| `permission:create-role` | — | Use `Role::findOrCreate()` |
-| `permission:create-permission` | — | Use `Permission::findOrCreate()` |
+| `permission:create-role` | N/A | Use `Role::findOrCreate()` |
+| `permission:create-permission` | N/A | Use `Permission::findOrCreate()` |
 | `permission:show` | `permissions-redis:stats` | Cache statistics |
-| — | `permissions-redis:warm` | **New:** warm full cache |
-| — | `permissions-redis:warm-user {id}` | **New:** warm single user |
+| N/A | `permissions-redis:warm` | **New:** warm full cache |
+| N/A | `permissions-redis:warm-user {id}` | **New:** warm single user |
 
 ---
 
@@ -344,9 +344,9 @@ php artisan permissions-redis:stats
 ### 2. Direct vs. role-based permission separation
 
 **Spatie** provides methods to distinguish between direct permissions and role-inherited permissions:
-- `getDirectPermissions()` — permissions assigned directly to the user
-- `getPermissionsViaRoles()` — permissions inherited through roles
-- `hasDirectPermission()` — check only direct permissions
+- `getDirectPermissions()` returns permissions assigned directly to the user
+- `getPermissionsViaRoles()` returns permissions inherited through roles
+- `hasDirectPermission()` checks only direct permissions
 
 **This package** merges all permissions (direct + role-based) into a single Redis SET per user. There is no runtime distinction. If you rely on `getDirectPermissions()` or `hasDirectPermission()`, you will need to refactor that logic.
 
@@ -376,7 +376,7 @@ $directPermissionNames = DB::table('model_has_permissions')
 
 ### 5. In-memory caching
 
-**This package** has an additional in-memory cache layer within the same request. The resolution order is: in-memory → Redis → database. This eliminates redundant Redis calls for repeated checks in a single request.
+**This package** has an additional in-memory cache layer within the same request. The resolution order is: in-memory, then Redis, then database. This eliminates redundant Redis calls for repeated checks in a single request.
 
 ### 6. getAllPermissions() return type
 
@@ -390,12 +390,12 @@ If you access Eloquent-specific methods on the result (like `->pivot` or relatio
 
 | Spatie event | This package event |
 |-------------|-------------------|
-| `PermissionRegistered` | — |
-| `RoleRegistered` | — |
-| — | `RolesAssigned` |
-| — | `PermissionsSynced` |
-| — | `RoleDeleted` |
-| — | `UserDeleted` |
+| `PermissionRegistered` | N/A |
+| `RoleRegistered` | N/A |
+| N/A | `RolesAssigned` |
+| N/A | `PermissionsSynced` |
+| N/A | `RoleDeleted` |
+| N/A | `UserDeleted` |
 
 If you listen to Spatie events, update your listeners to use this package's events from `Scabarcas\LaravelPermissionsRedis\Events\*`.
 
@@ -411,29 +411,29 @@ If you listen to Spatie events, update your listeners to use this package's even
 
 | Spatie (`config/permission.php`) | This package (`config/permissions-redis.php`) | Notes |
 |----------------------------------|-----------------------------------------------|-------|
-| `models.permission` | — | Not configurable |
-| `models.role` | — | Not configurable |
+| `models.permission` | N/A | Not configurable |
+| `models.role` | N/A | Not configurable |
 | `table_names.permissions` | `tables.permissions` | Same default: `'permissions'` |
 | `table_names.roles` | `tables.roles` | Same default: `'roles'` |
 | `table_names.model_has_permissions` | `tables.model_has_permissions` | Same default |
 | `table_names.model_has_roles` | `tables.model_has_roles` | Same default |
 | `table_names.role_has_permissions` | `tables.role_has_permissions` | Same default |
-| `column_names.role_pivot_key` | — | Always `role_id` |
-| `column_names.permission_pivot_key` | — | Always `permission_id` |
-| `column_names.model_morph_key` | — | Always `model_id` |
+| `column_names.role_pivot_key` | N/A | Always `role_id` |
+| `column_names.permission_pivot_key` | N/A | Always `permission_id` |
+| `column_names.model_morph_key` | N/A | Always `model_id` |
 | `column_names.team_foreign_key` | `tenancy.resolver` | Use multi-tenancy instead |
 | `teams` | `tenancy.enabled` | Different implementation |
 | `cache.expiration_time` | `ttl` | In seconds (default: 86400) |
 | `cache.key` | `prefix` | Key prefix (default: `'auth:'`) |
 | `cache.store` | `redis_connection` | Always Redis |
 | `register_permission_check_method` | `register_gate` | Gate::before integration |
-| — | `register_middleware` | Auto-register middleware aliases |
-| — | `register_blade_directives` | Auto-register Blade directives |
-| — | `warm_on_login` | Auto-warm cache on login |
-| — | `super_admin_role` | Role that bypasses all checks |
-| — | `wildcard_permissions` | fnmatch() wildcard support |
-| — | `octane.reset_on_request` | Octane compatibility |
-| — | `model_morph_key_type` | UUID/ULID support |
+| N/A | `register_middleware` | Auto-register middleware aliases |
+| N/A | `register_blade_directives` | Auto-register Blade directives |
+| N/A | `warm_on_login` | Auto-warm cache on login |
+| N/A | `super_admin_role` | Role that bypasses all checks |
+| N/A | `wildcard_permissions` | fnmatch() wildcard support |
+| N/A | `octane.reset_on_request` | Octane compatibility |
+| N/A | `model_morph_key_type` | UUID/ULID support |
 
 ---
 
@@ -455,11 +455,11 @@ If you're reusing the same table names (recommended), **no**. The migration comm
 
 All existing permissions, roles, and assignments carry over. The migration command copies the data and warms the Redis cache.
 
-### I use `getDirectPermissions()` — what do I do?
+### What do I do if I use `getDirectPermissions()`?
 
 See [Behavior differences > Direct vs. role-based permission separation](#2-direct-vs-role-based-permission-separation) for a workaround using direct database queries.
 
-### I use Spatie's team feature — what's the equivalent?
+### What's the equivalent of Spatie's team feature?
 
 Use the [multi-tenancy feature](../README.md#multi-tenancy). Enable it in config and configure a tenant resolver. Redis keys will be prefixed per tenant, providing full isolation.
 

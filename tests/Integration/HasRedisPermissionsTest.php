@@ -656,7 +656,7 @@ test('scopeRole with integer ID filters by guard and excludes cross-guard matche
         'role_id' => $apiAdmin->id, 'model_id' => $user2->id, 'model_type' => User::class,
     ]);
 
-    // Scope by the API admin's ID but with guard 'web' — should NOT match anyone.
+    // Scope by the API admin's ID but with guard 'web' (should not match anyone).
     $webQuery = User::query()->role($apiAdmin->id, 'web')->get();
 
     expect($webQuery)->toHaveCount(0);

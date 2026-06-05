@@ -141,7 +141,7 @@ test('getAllPermissions uses in-memory cache for user permission names across ca
     $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
     // User permission names are cached, so getUserPermissions is hit once.
     $this->repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|users.create']);
-    // Group metadata is NOT cached per-user — refetched every call so cross-user group changes are visible.
+    // Group metadata is not cached per-user, refetched every call so cross-user group changes are visible.
     $this->repository->shouldReceive('getPermissionGroups')
         ->with(['web|users.create'])
         ->twice()
@@ -287,7 +287,7 @@ test('super admin bypasses across all guards', function () {
     ]);
 
     $this->repository->shouldReceive('userCacheExists')->with(1)->once()->andReturn(true);
-    // Super admin role exists only in web guard — single SMEMBERS call finds it
+    // Super admin role exists only in web guard, so a single SMEMBERS call finds it
     $this->repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn(['web|super-admin']);
 
     // But check passes even for api guard
@@ -388,7 +388,7 @@ test('in-memory cache evicts oldest entries when limit is exceeded', function ()
 
     // User 2 should still be in cache (only user 1 was evicted)
     // User 1 should need to re-fetch from Redis
-    // Since we used andReturn, both calls succeed — the key assertion is that
+    // Since we used andReturn, both calls succeed, and the key assertion is that
     // the resolver doesn't crash and functions correctly under eviction
     expect($this->resolver->hasPermission(2, 'x'))->toBeTrue()
         ->and($this->resolver->hasPermission(4, 'x'))->toBeTrue();

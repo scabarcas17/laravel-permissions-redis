@@ -121,8 +121,8 @@ class TenantAwareRedisPermissionRepository implements PermissionRepositoryInterf
     }
 
     /**
-     * Permission groups are global (guard|name → group_name) so they are NOT
-     * tenant-scoped — they live in the shared permissions table. Delegate
+     * Permission groups are global (guard|name maps to group_name), so they are
+     * not tenant-scoped and live in the shared permissions table. Delegate
      * directly to the inner repository.
      *
      * @param array<string, string|null> $groups
@@ -176,8 +176,8 @@ class TenantAwareRedisPermissionRepository implements PermissionRepositoryInterf
 
     private function prefixKeySuffix(string $keySuffix): string
     {
-        // Transforms "user:123:permissions" → "user:t:{tenantId}:123:permissions"
-        // and "role:5:users" → "role:t:{tenantId}:5:users"
+        // Transforms "user:123:permissions" into "user:t:{tenantId}:123:permissions"
+        // and "role:5:users" into "role:t:{tenantId}:5:users"
         return (string) preg_replace_callback(
             '/^(user|role):(.+):(permissions|roles|users)$/',
             fn (array $m): string => $m[1] . ':' . $this->tenantKey($m[2]) . ':' . $m[3],

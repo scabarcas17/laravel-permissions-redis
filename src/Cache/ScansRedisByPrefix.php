@@ -10,7 +10,7 @@ use Redis;
 /**
  * SCAN helper shared across repository and CLI code. Works around the fact
  * that predis and phpredis both auto-prefix commands that take keys, but the
- * MATCH parameter of SCAN is a raw Redis pattern and is NOT prefixed — so the
+ * MATCH parameter of SCAN is a raw Redis pattern and is not prefixed, so the
  * pattern and the returned keys would be out of sync without adjustment.
  */
 trait ScansRedisByPrefix

@@ -266,7 +266,7 @@ trait HasRedisPermissions
     }
 
     /**
-     * Eloquent scope — filter users by role via SQL JOINs on the pivot tables.
+     * Eloquent scope to filter users by role via SQL JOINs on the pivot tables.
      *
      * NOTE: unlike hasRole()/hasPermission(), this scope runs against the
      * relational database, not the Redis cache. Use it when you need to
@@ -291,7 +291,7 @@ trait HasRedisPermissions
     }
 
     /**
-     * Eloquent scope — filter users by permission via SQL JOINs through the
+     * Eloquent scope to filter users by permission via SQL JOINs through the
      * permission and role pivot tables.
      *
      * NOTE: unlike hasPermission(), this scope queries the database directly
@@ -383,7 +383,7 @@ trait HasRedisPermissions
     /**
      * Resolve a mixed list of role identifiers to IDs. Integer IDs are
      * validated against the target guard and silently dropped if they do
-     * not belong to it — keeping guard isolation honest.
+     * not belong to it, which keeps guard isolation honest.
      *
      * @param array<mixed> $roles
      *
