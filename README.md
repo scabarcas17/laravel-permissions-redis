@@ -1,3 +1,12 @@
+<p align="center">
+  <a href="https://github.com/scabarcas17/laravel-permissions-redis">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/hero-dark.png">
+      <img alt="Laravel Permissions Redis — high-performance, Redis-backed roles & permissions for Laravel" src=".github/assets/hero-light.png" width="900">
+    </picture>
+  </a>
+</p>
+
 # Laravel Permissions Redis
 
 A high-performance, Redis-backed roles and permissions package for Laravel. Eliminates repetitive database queries by caching all authorization data in Redis with automatic invalidation.
