@@ -4,53 +4,41 @@
 <meta charset="utf-8">
 <style>
   :root{
-    --red:#D82C20;          /* Redis red accent */
-    --red-soft:#ff6257;     /* legible red on dark terminal */
-    --muted:#8b949e;        /* subtitle gray (ok on both themes) */
+    --red:#D82C20;
+    --red-soft:#ff6257;
+    --ink:#e9eef3;          /* wordmark on dark card */
+    --muted:#9aa4b2;
     --term-fg:#c9d1d9;
     --term-dim:#7d8794;
-  }
-  /* light theme (default) */
-  body[data-theme="light"]{
-    --ink:#1f2328;
-    --accent-text:#D82C20;
-    --term-bg:#0d1117;
-    --term-bar:#0b0f14;
-    --term-border:#222b36;
-    --term-panel:#11161d;
-    --term-shadow:0 40px 80px -30px rgba(13,17,23,.55),0 10px 24px -12px rgba(13,17,23,.4);
-  }
-  /* dark theme (for GitHub dark mode) */
-  body[data-theme="dark"]{
-    --ink:#e6edf3;
-    --accent-text:#ff5a4d;
-    --term-bg:#161b22;
-    --term-bar:#0d1117;
-    --term-border:#30363d;
-    --term-panel:#1b212a;
-    --term-shadow:0 24px 60px -24px rgba(0,0,0,.6);
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{background:transparent}
   .stage{
-    width:1600px;height:740px;background:transparent;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    display:inline-flex;padding:54px;background:transparent;
     font-family:-apple-system,"Helvetica Neue",Arial,sans-serif;
-    padding:0 70px;
+  }
+
+  /* self-contained hero card — works on any page background */
+  .card{
+    width:1300px;border-radius:26px;padding:60px 70px 64px;
+    background:linear-gradient(165deg,#1c232e 0%,#10151c 100%);
+    border:1px solid #2a323d;
+    box-shadow:0 34px 80px -34px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.02) inset;
+    display:flex;flex-direction:column;align-items:center;
   }
 
   /* ---------- logo ---------- */
-  .logo{display:flex;align-items:center;gap:26px;margin-bottom:48px}
+  .logo{display:flex;align-items:center;gap:26px;margin-bottom:46px}
   .mark{
     width:100px;height:100px;border-radius:23px;flex:none;
     background:linear-gradient(160deg,#e23a2d 0%,var(--red) 55%,#b21f15 100%);
     display:flex;align-items:center;justify-content:center;
-    box-shadow:0 12px 28px -10px rgba(216,44,32,.55);
+    box-shadow:0 12px 30px -8px rgba(216,44,32,.6);
   }
   .wordmark{display:flex;flex-direction:column;line-height:1}
   .wordmark .row{font-size:66px;font-weight:800;letter-spacing:-2px;white-space:nowrap}
   .wordmark .row .a{color:var(--ink)}
-  .wordmark .row .b{color:var(--accent-text)}
+  .wordmark .row .b{color:var(--red-soft)}
   .wordmark .sub{
     margin-top:16px;font-size:23px;font-weight:500;color:var(--muted);
     letter-spacing:.2px;padding-left:3px;
@@ -58,26 +46,26 @@
 
   /* ---------- terminal ---------- */
   .term{
-    width:1180px;border-radius:18px;background:var(--term-bg);
-    border:1px solid var(--term-border);box-shadow:var(--term-shadow);
+    width:100%;border-radius:16px;background:#0a0d12;
+    border:1px solid #232c37;box-shadow:0 18px 40px -22px rgba(0,0,0,.7);
     overflow:hidden;
   }
   .bar{height:46px;display:flex;align-items:center;gap:9px;padding:0 20px;
-    background:var(--term-bar);border-bottom:1px solid var(--term-border)}
+    background:#070a0e;border-bottom:1px solid #232c37}
   .dot{width:13px;height:13px;border-radius:50%}
   .dot.r{background:#ff5f56}.dot.y{background:#ffbd2e}.dot.g{background:#27c93f}
   .bar .t{margin-left:14px;color:#5c6675;font-size:16px;
     font-family:"SF Mono",Menlo,monospace}
 
-  .body{padding:34px 40px 38px;font-family:"SF Mono",Menlo,"Liberation Mono",monospace}
+  .body{padding:32px 38px 36px;font-family:"SF Mono",Menlo,"Liberation Mono",monospace}
   .head{display:flex;justify-content:space-between;align-items:center;
-    font-size:21px;color:var(--term-fg);margin-bottom:30px}
+    font-size:21px;color:var(--term-fg);margin-bottom:28px}
   .head .ver .g{color:var(--red-soft)}
   .head .ver .d{color:var(--term-dim)}
   .head .org{color:var(--term-dim);font-size:18px}
 
-  .panel{border:1px solid var(--term-border);border-radius:12px;
-    padding:26px 30px;background:var(--term-panel)}
+  .panel{border:1px solid #232c37;border-radius:12px;
+    padding:26px 30px;background:#121821}
   .panel .label{color:var(--term-dim);font-size:18px;margin-bottom:22px;letter-spacing:.5px}
 
   .pass{display:flex;align-items:baseline;font-size:21px;margin-bottom:20px}
@@ -94,8 +82,9 @@
   .why .p{color:var(--term-dim);font-size:19px;line-height:1.6;max-width:980px}
 </style>
 </head>
-<body data-theme="light">
+<body>
   <div class="stage">
+   <div class="card">
 
     <!-- LOGO -->
     <div class="logo">
@@ -152,10 +141,7 @@
       </div>
     </div>
 
+   </div>
   </div>
-  <script>
-    const t = new URLSearchParams(location.search).get('theme') || 'light';
-    document.body.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
-  </script>
 </body>
 </html>
