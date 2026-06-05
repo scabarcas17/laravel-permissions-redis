@@ -98,7 +98,7 @@
       </div>
       <div class="wordmark">
         <div class="row"><span class="a">Laravel Permissions </span><span class="b">Redis</span></div>
-        <div class="sub">High-performance, Redis-backed roles &amp; permissions for Laravel</div>
+        <div class="sub">Redis-backed roles &amp; permissions for Laravel, with surgical cache invalidation</div>
       </div>
     </div>
 
@@ -106,36 +106,35 @@
     <div class="term">
       <div class="bar">
         <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
-        <div class="t">~ php artisan perms:bench</div>
+        <div class="t">~ php artisan tinker</div>
       </div>
       <div class="body">
         <div class="head">
-          <div class="ver">&#9670; <span class="g">perms:bench</span> <span class="d">v4.0.0 &middot; 10k checks</span></div>
-          <div class="org">Redis cache</div>
+          <div class="ver">&#9670; <span class="g">permissions-redis</span> <span class="d">&middot; authorization</span></div>
+          <div class="org">Redis-backed</div>
         </div>
 
         <div class="panel">
-          <div class="label">Results</div>
+          <div class="label">Result</div>
 
           <div class="pass">
             <span class="chk">&#10003;</span>
-            <span class="word">PASS</span>
-            <span class="desc">permission check served from cache</span>
-            <span class="tag">p50 &middot; p99</span>
+            <span class="word">GRANTED</span>
+            <span class="desc">$user-&gt;can('posts.edit')</span>
+            <span class="tag">web guard</span>
           </div>
 
           <div class="line">
-            <span class="dim">$user-&gt;can('posts.edit')</span> resolved in
-            <span class="num">0.21 ms</span> <span class="dim">(p50),</span>
-            <span class="num">0.48 ms</span> <span class="dim">(p99)</span>
-            &mdash; <span class="num">70&times;</span> faster than the database guard.
+            Resolved from Redis:
+            <span class="num">1</span> <span class="dim">database query per request instead of</span>
+            <span class="num">4</span> <span class="dim">(75% fewer).</span>
           </div>
 
           <div class="why">
             <div class="k">Why:</div>
-            <div class="p">Roles and permissions are denormalized into Redis on every write, so
-              a gate check becomes a single O(1) lookup instead of N joins per request &mdash;
-              latency stays flat as your permission matrix grows.</div>
+            <div class="p">Roles and permissions are denormalized into Redis and invalidated
+              surgically (only the affected user), so authorization reads come off Redis
+              instead of your database, and changing a role never flushes everyone's cache.</div>
           </div>
         </div>
       </div>

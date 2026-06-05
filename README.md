@@ -1,14 +1,14 @@
 <p align="center">
   <a href="https://github.com/scabarcas17/laravel-permissions-redis">
-    <img alt="Laravel Permissions Redis, high-performance Redis-backed roles and permissions for Laravel" src=".github/assets/hero.png" width="900">
+    <img alt="Laravel Permissions Redis, Redis-backed roles and permissions for Laravel with surgical cache invalidation" src=".github/assets/hero.png" width="900">
   </a>
 </p>
 
 # Laravel Permissions Redis
 
-A high-performance, Redis-backed roles and permissions package for Laravel. Eliminates repetitive database queries by caching all authorization data in Redis with automatic invalidation.
+A Redis-backed roles and permissions package for Laravel with a Spatie-compatible API. It keeps each user's resolved permissions in Redis and invalidates the cache surgically (one user at a time) instead of flushing everything on every change.
 
-Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permission), the de facto standard for roles and permissions in Laravel. This package adopts its familiar API (`hasRole`, `hasPermissionTo`, `assignRole`, Blade directives, middleware) while replacing the database-per-request approach with a Redis-first architecture for applications where authorization throughput is critical.
+Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permission), the de facto standard for roles and permissions in Laravel. This package keeps its familiar API (`hasRole`, `hasPermissionTo`, `assignRole`, Blade directives, middleware) but changes the storage layer: Spatie caches the permission registry yet still lazy-loads each user's role and permission relations from the database per request (about 4 queries), while this package keeps the resolved per-user set in Redis (1 query). The goal is to take authorization load off the database and avoid full cache-flush stampedes on permission changes, not to be dramatically faster. For most apps, Spatie with its cache is simpler and enough; this package earns its place when the database is your bottleneck or permissions change often at scale.
 
 [![CI](https://github.com/scabarcas17/laravel-permissions-redis/actions/workflows/ci.yml/badge.svg)](https://github.com/scabarcas17/laravel-permissions-redis/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/scabarcas17/laravel-permissions-redis/graph/badge.svg)](https://codecov.io/gh/scabarcas17/laravel-permissions-redis)
@@ -51,6 +51,7 @@ Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permis
   - [When to Use This Package](#when-to-use-this-package)
 - [Migrating from Spatie](#migrating-from-spatie)
 - [Troubleshooting](#troubleshooting)
+- [Versioning](#versioning)
 - [License](#license)
 
 ---
@@ -1333,43 +1334,55 @@ $this->app->singleton(
 
 ### Performance Benchmark
 
-We provide a [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) that compares both packages side by side under identical conditions. Numbers below come from `php artisan bench:markdown --warm=5 --runs=30` against `v4.0.0` on SQLite + Redis (Apple Silicon, PHP 8.4, predis). Methodology: 5 warm-up + 30 measurement runs per strategy, GC reset before each run, percentiles reported across the measurement set. See the bench README for full methodology and how to reproduce.
+A [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) compares both packages side by side, run with `php artisan bench:markdown 1,10,50 --warm=5 --runs=30` (Apple Silicon, PHP 8.x, predis, local Redis). Each "request" resets in-memory state, so neither package carries PHP process memory across requests (matching PHP-FPM, and Octane where this package resets its in-memory cache per request). The robust, hardware-independent result is the **query count** (4 queries hitting several tables versus 1). Wall-clock is modest and depends heavily on your database, so read the latency tables with that in mind.
 
-#### Database queries per request
+#### Database queries per authorization-heavy request
 
 | Scenario | spatie/laravel-permission | laravel-permissions-redis | Reduction |
 |----------|:------------------------:|:-------------------------:|:---------:|
-| 1 iteration (37 checks) | 4 DB queries | 1 DB query | **75%** |
-| 10 iterations | 40 DB queries | 10 DB queries | **75%** |
-| 50 iterations | 200 DB queries | 50 DB queries | **75%** |
+| 1 request (37 checks) | 4 DB queries | 1 DB query | **75%** |
+| 10 requests | 40 DB queries | 10 DB queries | **75%** |
+| 50 requests | 200 DB queries | 50 DB queries | **75%** |
 
-#### Wall-clock time per request (median, p50)
+Spatie caches the *global* permission/role registry, but each `User::find()` still lazy-loads that user's role and permission relations from the database (about 4 queries across several tables). This package keeps the resolved per-user set in Redis, so the only database query left is the `SELECT ... FROM users` lookup; the rest is served from Redis plus a per-request in-memory cache.
+
+#### Wall-clock per request (median, p50)
+
+On in-process **SQLite** (database queries are nearly free, which isolates the Redis/in-memory paths):
 
 | Scenario | spatie/laravel-permission | laravel-permissions-redis | Speedup |
 |----------|:------------------------:|:-------------------------:|:-------:|
-| 1 iteration (37 checks) | 14.27 ms | 1.44 ms | **9.92x faster** |
-| 10 iterations | 144.38 ms | 14.39 ms | **10.03x faster** |
-| 50 iterations | 730.88 ms | 72.87 ms | **10.03x faster** |
+| 1 request (37 checks) | 2.22 ms | 1.70 ms | ~1.3x |
+| 10 requests | 23.0 ms | 16.4 ms | ~1.4x |
+| 50 requests | 118 ms | 82 ms | ~1.45x |
 
-> Each iteration exercises 27 `hasPermissionTo` calls, 4 `hasRole` calls, 4 batch ops (`hasAnyRole`, `hasAllRoles`, `hasAnyPermission`, `hasAllPermissions`), and 2 collection calls. Spatie caches the *global* permission/role registry, but each `User::find()` still triggers Eloquent's lazy-loading of the user's role and permission relations, for exactly 4 DB queries per authorization-heavy request. The Redis package keeps the full user-to-roles-to-permissions mapping in Redis, leaving only the `SELECT * FROM users` lookup. The speedup holds at **~10x median** across all iteration counts because both strategies scale linearly. The constant per iteration is what differs (4 DB queries vs 1 Redis lookup).
+On **MySQL over TCP** (a realistic networked database; numbers are noisy across runs):
 
-#### How the caching differs
+| Scenario | spatie/laravel-permission | laravel-permissions-redis | Speedup |
+|----------|:------------------------:|:-------------------------:|:-------:|
+| 1 request (37 checks) | ~3.5 ms | ~3.8 ms | ~1.0x (often a wash) |
+| 10 requests | ~36 ms | ~36 ms | ~1.0x |
+| 50 requests | ~185 ms | ~140 ms | ~1.3x |
+
+> Each request exercises 27 `hasPermissionTo` calls, 4 `hasRole` calls, 4 batch ops, and 2 collection calls. On SQLite, avoiding 3 relation queries shows up as ~1.4x. On a networked database this package replaces those DB queries with several Redis reads (`SMEMBERS` / `HMGET`) over the same network, so latency lands close to Spatie plus cache and the edge is small and noisy (clear only on authorization-heavy requests). It was never the order of magnitude older numbers implied. The durable, hardware-independent difference is the query count above; the latency benefit is real but modest and database-dependent.
+
+#### How the two approaches differ
 
 | Aspect | spatie/laravel-permission | laravel-permissions-redis |
 |--------|---------------------------|---------------------------|
-| **Cold start** | Queries DB, caches full permission array via Cache facade | Queries DB, warms Redis SETs per user/role |
-| **Warm check** | Deserialize cached array, then scan for match | `SISMEMBER` (O(1) hash lookup in Redis) |
-| **In-memory** | None; hits cache driver every call | Per-request memory cache avoids repeated Redis calls |
-| **Invalidation** | `forgetCachedPermissions()`, drops entire cache | Surgical: only rewarms affected user/role |
-| **After invalidation** | Next request pays full DB reload cost | Cache is already warm, zero penalty |
-| **Concurrent users** | Each request may independently rebuild cache | Redis SETs are shared across all processes |
+| **What's cached globally** | Permission/role registry (in the Cache store) | Same data, denormalized into per-user/per-role Redis SETs |
+| **Per-user resolution** | Lazy-loads the user's role/permission relations from the DB each request | Reads the resolved per-user set from Redis |
+| **Permission check** | In-memory check once the relations are loaded | `SISMEMBER` against a Redis SET, then in-memory for the rest of the request |
+| **Invalidation** | `forgetCachedPermissions()` drops the whole registry cache | Surgical: rewarms only the affected user/role |
+| **After a change** | Next requests rebuild the registry from the DB | Other users' caches are untouched |
 
-#### When the difference matters most
+#### Where it actually helps
 
-- **High-traffic APIs.** Hundreds of permission checks per second. The O(1) Redis lookup vs O(n) array scan adds up.
-- **Role/permission changes.** Spatie drops the entire cache, so the next N requests all hit the DB simultaneously. This package rewarms only the affected user(s).
-- **Octane / long-running workers.** Spatie's cache can go stale in persistent workers. This package flushes in-memory state between Octane requests automatically.
-- **Multi-tenant apps.** Isolated Redis key namespaces prevent tenants from leaking data.
+- **Reducing database load.** The durable win is 75% fewer DB queries per request (across several tables), which shifts authorization reads off the database and its connection pool onto Redis. It also gives a modest latency win, larger on slower or more remote databases.
+- **Frequent role/permission changes.** Spatie drops the whole registry cache on any change; this package rewarms only the affected user(s), avoiding a cache-rebuild stampede.
+- **Multi-tenant apps.** Per-tenant Redis key isolation is built in.
+
+If your app runs a handful of checks per request at low traffic, Spatie with its cache is perfectly adequate and simpler (no hard Redis dependency). See [When to Use This Package](#when-to-use-this-package).
 
 #### Try it yourself
 
@@ -1386,7 +1399,7 @@ See the [benchmark repository](https://github.com/scabarcas17/laravel-permission
 
 #### Use `laravel-permissions-redis` when:
 
-- **Performance is critical.** Your app handles high traffic and permission checks are a bottleneck. Redis `SISMEMBER` is orders of magnitude faster than deserializing cached arrays.
+- **Database load is your bottleneck.** You want authorization reads off the database and its connection pool: 1 query per request instead of 4. Per-request latency improves modestly too (more on slow or remote databases), but this is not an order-of-magnitude speedup.
 - **You already run Redis.** If Redis is part of your stack (sessions, queues, cache), adding authorization to it is a natural fit with no additional infrastructure.
 - **You use Laravel Octane.** Built-in support for flushing in-memory state between requests prevents stale permission data in long-lived workers.
 - **You need multi-tenancy.** Redis key isolation per tenant is built in, with support for `stancl/tenancy` or custom resolvers.
@@ -1599,6 +1612,12 @@ php artisan permissions-redis:migrate-from-spatie
        Scabarcas\LaravelPermissionsRedis\PermissionsRedisServiceProvider::class,
    ];
    ```
+
+---
+
+## Versioning
+
+This package follows [Semantic Versioning](https://semver.org). The early 1.x through 4.x line moved fast and shipped breaking changes more often than it should have; from `4.x` onward the API is considered stable, and breaking changes will only land in a new major (`5.0.0`). Minor releases add backwards-compatible features, patch releases are fixes only. If a release breaks something that this policy says it shouldn't, please open an issue, it's a bug.
 
 ---
 
