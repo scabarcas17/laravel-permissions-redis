@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use Scabarcas\LaravelPermissionsRedis\Cache\TenantAwareRedisPermissionRepository;
-use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository;
 
 function createTenantRepo(InMemoryPermissionRepository $inner, string|int|null $tenantId): TenantAwareRedisPermissionRepository
 {

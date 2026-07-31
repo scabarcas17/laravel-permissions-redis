@@ -8,6 +8,7 @@ use BackedEnum;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use InvalidArgumentException;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
 use Scabarcas\LaravelPermissionsRedis\Events\RoleDeleted;
@@ -23,6 +24,9 @@ class Role extends Model
 {
     /** @var list<string> */
     protected $fillable = ['name', 'description', 'guard_name'];
+
+    /** @var array<int, float> */
+    private static array $rewarmAttempts = [];
 
     public static function findOrCreate(string $name, string $guardName = 'web'): static
     {
@@ -120,7 +124,35 @@ class Role extends Model
         /** @var PermissionRepositoryInterface $repository */
         $repository = app(PermissionRepositoryInterface::class);
 
+        if ($repository->roleHasPermission($this->id, $encoded)) {
+            return true;
+        }
+
+        // A miss can also mean the role's Redis key expired (TTL). Rewarm and
+        // re-check before answering false, throttled with the same cooldown as
+        // the resolver so genuinely-absent permissions cannot storm the DB.
+        $cooldown = $this->rewarmCooldownSeconds();
+        $lastAttempt = self::$rewarmAttempts[$this->id] ?? null;
+
+        if ($cooldown > 0.0 && $lastAttempt !== null && (microtime(true) - $lastAttempt) < $cooldown) {
+            return false;
+        }
+
+        self::$rewarmAttempts[$this->id] = microtime(true);
+
+        /** @var AuthorizationCacheManager $cacheManager */
+        $cacheManager = app(AuthorizationCacheManager::class);
+        $cacheManager->warmRole($this->id);
+
         return $repository->roleHasPermission($this->id, $encoded);
+    }
+
+    /**
+     * @internal Used by Octane reset and testing utilities.
+     */
+    public static function flushRewarmAttempts(): void
+    {
+        self::$rewarmAttempts = [];
     }
 
     protected static function booted(): void
@@ -131,10 +163,31 @@ class Role extends Model
             }
         });
 
+        // Captured in `deleting` because the FK cascade wipes the pivot rows
+        // before `deleted` fires, and the Redis role:users index may have
+        // expired by then.
+        static::deleting(function (Role $role): void {
+            /** @var AuthorizationCacheManager $cacheManager */
+            $cacheManager = app(AuthorizationCacheManager::class);
+            $role->setAttribute('_affected_user_ids', $cacheManager->getRoleUserIdsFromDb($role->id));
+        });
+
         static::deleted(function (Role $role): void {
             HasRedisPermissions::flushRoleIdNameCache();
-            event(new RoleDeleted($role->id));
+
+            /** @var array<int|string> $affectedUserIds */
+            $affectedUserIds = $role->getAttribute('_affected_user_ids') ?? [];
+
+            event(new RoleDeleted($role->id, $affectedUserIds));
         });
+    }
+
+    private function rewarmCooldownSeconds(): float
+    {
+        /** @var float|int $cooldown */
+        $cooldown = config('permissions-redis.resolver_warm_cooldown', 1.0);
+
+        return (float) $cooldown;
     }
 
     /**

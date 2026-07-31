@@ -8,7 +8,7 @@ use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Models\Permission;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
-use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -151,6 +151,40 @@ test('hasallpermissions returns false when user lacks one', function () {
 
 test('hasallpermissions returns false when not authenticated', function () {
     expect(Blade::check('hasallpermissions', 'users.create'))->toBeFalse();
+});
+
+// ─── @unlessrole / @unlesspermission (auto-registered by Blade::if) ───
+
+test('unlessrole directive renders content when user lacks the role', function () {
+    $this->actingAs($this->user);
+
+    $rendered = Blade::render("@unlessrole('editor') visible @endrole");
+
+    expect(trim($rendered))->toBe('visible');
+});
+
+test('unlessrole directive hides content when user has the role', function () {
+    $this->actingAs($this->user);
+
+    $rendered = Blade::render("@unlessrole('admin') hidden @endrole");
+
+    expect(trim($rendered))->toBe('');
+});
+
+test('unlesspermission directive renders content when user lacks the permission', function () {
+    $this->actingAs($this->user);
+
+    $rendered = Blade::render("@unlesspermission('dashboard.view') visible @endpermission");
+
+    expect(trim($rendered))->toBe('visible');
+});
+
+test('unlesspermission directive hides content when user has the permission', function () {
+    $this->actingAs($this->user);
+
+    $rendered = Blade::render("@unlesspermission('users.create') hidden @endpermission");
+
+    expect(trim($rendered))->toBe('');
 });
 
 // ─── Guard override ───

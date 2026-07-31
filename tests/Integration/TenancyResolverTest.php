@@ -6,8 +6,8 @@ use Scabarcas\LaravelPermissionsRedis\Cache\RedisPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Cache\TenantAwareRedisPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\PermissionsRedisServiceProvider;
+use Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\FakeTenantResolver;
-use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
 
 function registerTenantedProvider(\Illuminate\Contracts\Foundation\Application $app, mixed $resolverConfig): void
 {

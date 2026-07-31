@@ -2,12 +2,14 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
 use Scabarcas\LaravelPermissionsRedis\Models\Permission;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
-use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\TestPermissionEnum;
 
 test('Role syncPermissions replaces all permissions and dispatches event', function () {
@@ -131,4 +133,33 @@ test('Role hasPermission accepts a BackedEnum permission', function () {
     $repo->setRolePermissions($role->id, ['web|users.create']);
 
     expect($role->hasPermission(TestPermissionEnum::Create))->toBeTrue();
+});
+
+test('Role hasPermission rewarms an expired role cache before answering false', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+    $this->app->singleton(AuthorizationCacheManager::class, fn () => new AuthorizationCacheManager($repo));
+
+    $role = Role::create(['name' => 'admin', 'guard_name' => 'web']);
+    $perm = Permission::findOrCreate('users.create');
+    DB::table('role_has_permissions')->insert([
+        'role_id' => $role->id, 'permission_id' => $perm->id,
+    ]);
+
+    // Nothing cached for this role: the same state as a TTL-expired key
+    expect($role->hasPermission('users.create'))->toBeTrue();
+});
+
+test('Role hasPermission throttles rewarms for genuinely missing permissions', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+
+    $role = Role::create(['name' => 'admin', 'guard_name' => 'web']);
+
+    $manager = Mockery::mock(AuthorizationCacheManager::class);
+    $manager->shouldReceive('warmRole')->with($role->id)->once();
+    $this->app->instance(AuthorizationCacheManager::class, $manager);
+
+    expect($role->hasPermission('users.delete'))->toBeFalse()
+        ->and($role->hasPermission('users.delete'))->toBeFalse();
 });

@@ -525,7 +525,18 @@ Route::get('/reports', [ReportController::class, 'index'])
 @hasallpermissions('users.ban|users.delete')
     <button class="btn-warning">Manage User</button>
 @endhasallpermissions
+
+{{-- Negated checks: render when the user lacks the role/permission --}}
+@unlessrole('admin')
+    <p>Regular account</p>
+@endrole
+
+@unlesspermission('billing.manage')
+    <p>Ask an administrator for billing access.</p>
+@endpermission
 ```
+
+Every directive also has an `unless` variant (`@unlessrole`, `@unlesspermission`, `@unlesshasanyrole`, ...) that renders when the check fails. They close with the regular `@endrole` / `@endpermission` tags, not `@endunlessrole`.
 
 #### Guard Override
 
@@ -840,7 +851,7 @@ auth:user:1:permissions
 auth:user:t:acme:1:permissions
 ```
 
-Role-related keys (`auth:role:*`) are shared across tenants since they reference global database records. If you need per-tenant roles, use separate database tables per tenant.
+Role-related keys are prefixed the same way (`auth:role:t:acme:5:permissions`), so cached role data is isolated per tenant even though role definitions live in the shared database tables.
 
 ---
 
@@ -1137,8 +1148,9 @@ try {
 | Event | Payload | Dispatched When | Cache Action |
 |---|---|---|---|
 | `RolesAssigned` | `Model $user` | `assignRole()`, `syncRoles()`, `removeRole()` | Rewarms user cache + reindexes role-to-users mapping |
+| `PermissionsAssigned` | `Model $user` | `givePermissionTo()`, `revokePermissionTo()`, `syncPermissions()` on a user | Rewarms user cache |
 | `PermissionsSynced` | `Model $role` | `$role->syncPermissions()`, `givePermissionTo()`, `revokePermissionTo()` | Rewarms role + all users with that role |
-| `RoleDeleted` | `int $roleId` | `Role::delete()` | Evicts role cache + rewarms affected users |
+| `RoleDeleted` | `int $roleId`, `array $affectedUserIds` | `Role::delete()` | Evicts role cache + rewarms affected users |
 | `UserDeleted` | `int\|string $userId` | Manually dispatched | Evicts user cache from Redis |
 
 All events are in the `Scabarcas\LaravelPermissionsRedis\Events` namespace and use the `Dispatchable` trait.
@@ -1267,7 +1279,7 @@ Alternatively, bind the in-memory repository in your test suite to avoid Redis e
 
 ```php
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
-use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository;
 
 // In your TestCase::setUp()
 $this->app->singleton(
@@ -1311,7 +1323,7 @@ $this->app->singleton(
 | AND (`&`) / OR (`\|`) operators in middleware | ✅ | ✅ |
 | `@role` / `@hasanyrole` / `@hasallroles` | ✅ | ✅ |
 | `@permission` / `@hasanypermission` / `@hasallpermissions` | ❌ | ✅ |
-| `@unlessrole` | ✅ | ❌ (use `@role ... @else`) |
+| `@unlessrole` / `@unlesspermission` | Roles only | ✅ (close with `@endrole` / `@endpermission`) |
 | Gate integration (`@can`, `authorize()`) | ✅ | ✅ |
 | **Advanced** | | |
 | Wildcard permissions (`fnmatch`) | Partial | ✅ |

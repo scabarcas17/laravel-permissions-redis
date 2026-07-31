@@ -85,7 +85,11 @@ class CacheInvalidator
 
         $this->log("Cache invalidation: role {$roleId} deleted.");
 
-        $userIds = $this->repository->getRoleUserIds($roleId);
+        // The Redis index is a fallback for manually-dispatched events; it may
+        // have expired, and the DB pivot rows are already cascade-deleted here.
+        $userIds = $event->affectedUserIds !== []
+            ? $event->affectedUserIds
+            : $this->repository->getRoleUserIds($roleId);
 
         $this->repository->deleteRoleCache($roleId);
 

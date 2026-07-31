@@ -115,5 +115,6 @@ trait WithPermissions
     {
         app(PermissionRepositoryInterface::class)->flushAll();
         app(PermissionResolverInterface::class)->flush();
+        Role::flushRewarmAttempts();
     }
 }

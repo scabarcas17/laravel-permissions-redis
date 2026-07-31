@@ -9,7 +9,7 @@ use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Events\RoleDeleted;
 use Scabarcas\LaravelPermissionsRedis\Models\Permission;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
-use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 test('Permission model uses configurable table name', function () {
@@ -183,6 +183,48 @@ test('Role deleted event dispatches RoleDeleted', function () {
     Event::assertDispatched(RoleDeleted::class, function (RoleDeleted $event) use ($roleId) {
         return $event->roleId === $roleId;
     });
+});
+
+test('Role deleted event carries user ids captured before the delete', function () {
+    Event::fake([RoleDeleted::class]);
+
+    $role = Role::create(['name' => 'editor', 'guard_name' => 'web']);
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+    DB::table('model_has_roles')->insert([
+        'role_id' => $role->id, 'model_id' => $user->id, 'model_type' => User::class,
+    ]);
+
+    $role->delete();
+
+    Event::assertDispatched(RoleDeleted::class, function (RoleDeleted $event) use ($user) {
+        return count($event->affectedUserIds) === 1
+            && (int) $event->affectedUserIds[0] === $user->id;
+    });
+});
+
+test('Role delete rewarms affected users even when the Redis role index expired', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+    $this->app->singleton(AuthorizationCacheManager::class, fn () => new AuthorizationCacheManager($repo));
+
+    $role = Role::create(['name' => 'editor', 'guard_name' => 'web']);
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+    DB::table('model_has_roles')->insert([
+        'role_id' => $role->id, 'model_id' => $user->id, 'model_type' => User::class,
+    ]);
+
+    app(AuthorizationCacheManager::class)->warmUser($user->id);
+    expect($repo->getUserRoles($user->id))->toContain('web|editor');
+
+    // Same state as a TTL-expired role:users index
+    $repo->deleteRoleCache($role->id);
+
+    $role->delete();
+
+    // Asserted through roles: the user-roles rewarm joins the roles table, so
+    // it reflects the delete even though the SQLite test connection does not
+    // cascade the pivot rows.
+    expect($repo->getUserRoles($user->id))->not->toContain('web|editor');
 });
 
 test('Permission saved hook syncs group metadata to Redis hash', function () {

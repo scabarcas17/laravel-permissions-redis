@@ -132,6 +132,19 @@ class AuthorizationCacheManager
         return $directUserIds->merge($roleUserIds)->unique()->values()->all();
     }
 
+    /**
+     * @return array<int|string>
+     */
+    public function getRoleUserIdsFromDb(int $roleId): array
+    {
+        /** @var array<int|string> */
+        return DB::table($this->table('model_has_roles'))
+            ->where('role_id', $roleId)
+            ->whereIn('model_type', $this->userModelTypes())
+            ->pluck('model_id')
+            ->all();
+    }
+
     /** @return array<string> */
     private function computeUserPermissions(int|string $userId): array
     {
@@ -224,19 +237,6 @@ class AuthorizationCacheManager
                 ->select($permissionsTable . '.guard_name', $permissionsTable . '.name')
                 ->cursor()
         );
-    }
-
-    /**
-     * @return array<int|string>
-     */
-    private function getRoleUserIdsFromDb(int $roleId): array
-    {
-        /** @var array<int|string> */
-        return DB::table($this->table('model_has_roles'))
-            ->where('role_id', $roleId)
-            ->whereIn('model_type', $this->userModelTypes())
-            ->pluck('model_id')
-            ->all();
     }
 
     private function warmAllRoles(): void
