@@ -14,7 +14,7 @@ use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
 use Scabarcas\LaravelPermissionsRedis\Listeners\WarmCacheOnLogin;
 use Scabarcas\LaravelPermissionsRedis\PermissionsRedisServiceProvider;
 use Scabarcas\LaravelPermissionsRedis\Resolver\PermissionResolver;
-use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 test('binds PermissionRepositoryInterface to RedisPermissionRepository', function () {

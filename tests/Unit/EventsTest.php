@@ -35,6 +35,18 @@ test('RoleDeleted holds role id', function () {
     expect($event->roleId)->toBe(10);
 });
 
+test('RoleDeleted defaults to no affected user ids', function () {
+    $event = new RoleDeleted(10);
+
+    expect($event->affectedUserIds)->toBe([]);
+});
+
+test('RoleDeleted holds affected user ids captured before the delete', function () {
+    $event = new RoleDeleted(10, [1, 2, 'uuid-3']);
+
+    expect($event->affectedUserIds)->toBe([1, 2, 'uuid-3']);
+});
+
 test('UserDeleted holds user id', function () {
     $event = new UserDeleted(20);
 

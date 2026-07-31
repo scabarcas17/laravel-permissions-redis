@@ -29,6 +29,7 @@ use Scabarcas\LaravelPermissionsRedis\Listeners\WarmCacheOnLogin;
 use Scabarcas\LaravelPermissionsRedis\Middleware\PermissionMiddleware;
 use Scabarcas\LaravelPermissionsRedis\Middleware\RoleMiddleware;
 use Scabarcas\LaravelPermissionsRedis\Middleware\RoleOrPermissionMiddleware;
+use Scabarcas\LaravelPermissionsRedis\Models\Role;
 use Scabarcas\LaravelPermissionsRedis\Resolver\PermissionResolver;
 use Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions;
 
@@ -273,6 +274,7 @@ class PermissionsRedisServiceProvider extends ServiceProvider
             $repository->resetState();
 
             HasRedisPermissions::flushRoleIdNameCache();
+            Role::flushRewarmAttempts();
         });
     }
 }

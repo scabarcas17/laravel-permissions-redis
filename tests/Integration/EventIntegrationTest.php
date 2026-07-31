@@ -12,7 +12,7 @@ use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
 use Scabarcas\LaravelPermissionsRedis\Events\UserDeleted;
 use Scabarcas\LaravelPermissionsRedis\Listeners\CacheInvalidator;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
-use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;
 
 beforeEach(function () {

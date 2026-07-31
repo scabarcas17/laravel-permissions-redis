@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.1] - 2026-07-31
+
+Patch release: cache-consistency fixes for role deletion and role permission
+checks after TTL expiry, plus a packaging fix for the testing repository.
+
+### Fixed
+
+- **`InMemoryPermissionRepository` now ships with the package.** The README pointed to `Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository`, but `tests/` is dev-only autoload and excluded from the dist archive, so the class never reached installed apps. It now lives at `Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository`, next to the `WithPermissions` trait.
+- **Deleting a role could leave its users with stale cached permissions.** The `RoleDeleted` listener read the affected user list from the Redis `role:{id}:users` index after the database delete; if that index had expired (TTL), the list came back empty and no user cache was rewarmed, while the pivot rows were already gone via FK cascade. Affected user IDs are now captured from the database in `Role::deleting` and carried on the event (`RoleDeleted::$affectedUserIds`, optional constructor argument, so existing dispatch sites keep working). The Redis index remains as fallback for manually-dispatched events.
+- **`Role::hasPermission()` answered false on an expired role cache.** The check was a bare `SISMEMBER` with no warm-on-miss (the user-side path has one via `ensureUserCacheExists`). A miss now rewarms the role from the database and re-checks before answering false, throttled per role with the same `resolver_warm_cooldown` the resolver uses, so genuinely absent permissions cannot storm the database.
+
+### Added
+
+- **Tests and docs for the `@unlessrole` / `@unlesspermission` Blade directives.** They have always worked (`Blade::if` registers an `unless` variant for every conditional) but were undocumented and marked as missing in the comparison table. Note the closing tag differs from Spatie: `@endrole` / `@endpermission`, not `@endunlessrole`.
+- **composer.json `support`, `funding`, and `suggest` blocks.**
+
+### Docs
+
+- The multi-tenancy section claimed role keys are shared across tenants; they are tenant-prefixed like user keys (`auth:role:t:{tenant}:{id}:*`).
+- `PermissionsAssigned` was missing from the API-reference events table.
+
 ## [4.0.0] - 2026-05-14
 
 Stable release of the 4.x line. No code changes since `v4.0.0-beta.2`; three
@@ -212,6 +233,8 @@ First stable release of `scabarcas/laravel-permissions-redis`.
 - **Test suite.** Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
 - **Documentation.** README with installation guide, usage examples, conventions, API reference, and C4 architecture diagrams.
 
+[4.0.1]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.0...v4.0.1
+[4.0.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.0-beta.2...v4.0.0
 [4.0.0-beta.2]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.0-beta.1...v4.0.0-beta.2
 [4.0.0-beta.1]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v3.0.0...v4.0.0-beta.1
 [3.0.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v2.0.0...v3.0.0

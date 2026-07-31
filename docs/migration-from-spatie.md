@@ -193,7 +193,7 @@ Most Blade directives work identically. Key differences:
 | `@hasrole('admin')` | `@role('admin')` | Use `@role` instead of `@hasrole` |
 | `@hasanyrole('a\|b')` | `@hasanyrole('a\|b')` | Identical |
 | `@hasallroles('a\|b')` | `@hasallroles('a\|b')` | Identical |
-| `@unlessrole('admin')` | `@role('admin') @else` | Use `@else` block instead |
+| `@unlessrole('admin')` | `@unlessrole('admin')` | Close with `@endrole`, not `@endunlessrole` |
 | `@can('perm')` | `@can('perm')` | Identical (Gate integration) |
 | N/A | `@permission('perm')` | **New:** direct permission check |
 | N/A | `@hasanypermission('a\|b')` | **New:** any permission check |
@@ -205,7 +205,7 @@ Most Blade directives work identically. Key differences:
 grep -rn "@hasrole\|@endhasrole\|@unlessrole\|@endunlessrole" resources/views/
 ```
 
-Replace `@hasrole` with `@role` and convert `@unlessrole` patterns:
+Replace `@hasrole` with `@role` and swap the `@unlessrole` closing tag:
 
 ```diff
 - @hasrole('admin')
@@ -214,12 +214,9 @@ Replace `@hasrole` with `@role` and convert `@unlessrole` patterns:
 - @endhasrole
 + @endrole
 
-- @unlessrole('admin')
--     Non-admin content
+  @unlessrole('admin')
+      Non-admin content
 - @endunlessrole
-+ @role('admin')
-+ @else
-+     Non-admin content
 + @endrole
 ```
 
@@ -393,6 +390,7 @@ If you access Eloquent-specific methods on the result (like `->pivot` or relatio
 | `PermissionRegistered` | N/A |
 | `RoleRegistered` | N/A |
 | N/A | `RolesAssigned` |
+| N/A | `PermissionsAssigned` |
 | N/A | `PermissionsSynced` |
 | N/A | `RoleDeleted` |
 | N/A | `UserDeleted` |

@@ -38,6 +38,23 @@
             "role": "Developer"
         }
     ],
+    "support": {
+        "issues": "https://github.com/scabarcas17/laravel-permissions-redis/issues",
+        "source": "https://github.com/scabarcas17/laravel-permissions-redis",
+        "docs": "https://github.com/scabarcas17/laravel-permissions-redis#readme"
+    },
+    "funding": [
+        {
+            "type": "github",
+            "url": "https://github.com/sponsors/scabarcas17"
+        }
+    ],
+    "suggest": {
+        "ext-redis": "Recommended Redis driver in production (phpredis)",
+        "predis/predis": "Userland alternative when the phpredis extension is unavailable",
+        "laravel/octane": "The package resets its in-memory state between Octane requests",
+        "stancl/tenancy": "Built-in tenant resolver for multi-tenant cache isolation"
+    },
     "minimum-stability": "stable",
     "prefer-stable": true,
     "scripts": {

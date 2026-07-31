@@ -79,6 +79,15 @@ test('handleRoleDeleted with no affected users', function () {
     $this->invalidator->handleRoleDeleted(new RoleDeleted(7));
 });
 
+test('handleRoleDeleted prefers user ids carried by the event over the Redis index', function () {
+    $this->repository->shouldReceive('getRoleUserIds')->never();
+    $this->repository->shouldReceive('deleteRoleCache')->with(7)->once();
+    $this->cacheManager->shouldReceive('warmUser')->with(1)->once();
+    $this->cacheManager->shouldReceive('warmUser')->with(2)->once();
+
+    $this->invalidator->handleRoleDeleted(new RoleDeleted(7, [1, 2]));
+});
+
 test('handleUserDeleted removes user cache', function () {
     $this->repository->shouldReceive('deleteUserCache')->with(15)->once();
 

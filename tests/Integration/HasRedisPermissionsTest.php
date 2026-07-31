@@ -10,7 +10,7 @@ use Scabarcas\LaravelPermissionsRedis\Events\PermissionsAssigned;
 use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
 use Scabarcas\LaravelPermissionsRedis\Models\Permission;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
-use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\InMemoryPermissionRepository;
+use Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\TestPermissionEnum;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\TestRoleEnum;
 use Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\User;

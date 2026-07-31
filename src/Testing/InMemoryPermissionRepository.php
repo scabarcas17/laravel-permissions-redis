@@ -2,10 +2,14 @@
 
 declare(strict_types=1);
 
-namespace Scabarcas\LaravelPermissionsRedis\Tests\Fixtures;
+namespace Scabarcas\LaravelPermissionsRedis\Testing;
 
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 
+/**
+ * Array-backed PermissionRepositoryInterface implementation. Bind it in a
+ * test suite to run permission checks without a Redis server.
+ */
 class InMemoryPermissionRepository implements PermissionRepositoryInterface
 {
     /** @var array<int|string, array<string>> */
