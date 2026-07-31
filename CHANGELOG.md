@@ -153,7 +153,7 @@ From `v3.0.0` to `v4.0.0-beta.1`:
 - **`PermissionDTO` as `readonly` class.** Immutable data transfer object using PHP 8.2+ `readonly` class syntax.
 - **Permission model `deleting` hook.** Automatically cleans up pivot table entries when a permission is deleted.
 - **Role model `syncPermissions()`, `givePermissionTo()`, `revokePermissionTo()`.** Fluent permission management methods directly on the Role model with automatic cache invalidation.
-- **Comprehensive test suite expansion.** Added `BladeDirectivesTest`, `RedisPermissionRepositoryTest`, `ModelsTest`, `ServiceProviderTest`, and significantly expanded `HasRedisPermissionsTest`, `CacheManagerWarmTest`, `CommandsTest`, and `PermissionResolverTest` (+1,500 lines of tests).
+- **Test suite expansion.** Added `BladeDirectivesTest`, `RedisPermissionRepositoryTest`, `ModelsTest`, `ServiceProviderTest`, and expanded `HasRedisPermissionsTest`, `CacheManagerWarmTest`, `CommandsTest`, and `PermissionResolverTest` (+1,500 lines of tests).
 - **Test enum fixtures.** `TestPermissionEnum` and `TestRoleEnum` for typed enum testing.
 
 ### Changed
@@ -209,7 +209,7 @@ First stable release of `scabarcas/laravel-permissions-redis`.
 - **Configurable table names.** All 5 tables can be renamed via config to avoid conflicts.
 - **Publishable config.** `config/permissions-redis.php` with env variable support for all runtime options.
 - **Database migrations.** Auto-loaded migration for the 5 permission tables with foreign keys and composite primary keys.
-- **Comprehensive test suite.** Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
+- **Test suite.** Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
 - **Documentation.** README with installation guide, usage examples, conventions, API reference, and C4 architecture diagrams.
 
 [4.0.0-beta.2]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.0-beta.1...v4.0.0-beta.2

@@ -1,6 +1,6 @@
 # Contributing to Laravel Permissions Redis
 
-Thank you for considering contributing to this project! Every contribution is welcome and appreciated.
+Thanks for considering a contribution.
 
 ## Development Setup
 
@@ -40,10 +40,10 @@ This project uses [Laravel Pint](https://laravel.com/docs/pint) for code formatt
 
 ```bash
 # Check formatting
-composer format
+vendor/bin/pint --test
 
-# Fix formatting automatically
-vendor/bin/pint
+# Fix formatting
+composer format
 ```
 
 ### Static Analysis
@@ -71,7 +71,7 @@ When filing a bug report, include:
 
 ### Suggesting Features
 
-Feature requests are welcome! Open an issue with the `enhancement` label and describe:
+Feature requests are welcome. Open an issue with the `enhancement` label and describe:
 
 - The problem you're trying to solve
 - Your proposed solution

@@ -62,19 +62,13 @@ Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permis
 
 | Dependency | Version | Purpose |
 |---|---|---|
-| **PHP** | `^8.3` | Typed properties, enums, fibers, `readonly` classes |
+| **PHP** | `^8.3` | Minimum version the package is tested on |
 | **Laravel Framework** | `^11.0 \| ^12.0 \| ^13.0` | Host application |
 | **Redis extension** | `phpredis` or `predis` | Redis connectivity |
 
 ### PHP Extensions
 
-| Extension | Required | Notes |
-|---|---|---|
-| `redis` (phpredis) | Yes* | Recommended for production. Install via `pecl install redis` |
-| `json` | Yes | Bundled with PHP 8.3+ |
-| `mbstring` | Yes | Required by Laravel |
-
-> \* You can use `predis/predis` as a userland alternative if `phpredis` is not available. Configure `'client' => 'predis'` in `config/database.php` under the Redis section.
+The `redis` extension (phpredis) is recommended in production (`pecl install redis`). If you can't install it, `predis/predis` works as a userland alternative: set `'client' => 'predis'` in `config/database.php` under the Redis section.
 
 ### Laravel Components Used
 
@@ -113,14 +107,14 @@ Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permis
 
 ```mermaid
 flowchart LR
-    User["👤 Application User"]
+    User["Application User"]
 
     subgraph system [" "]
-        App["🟩 Laravel Application\nRoles & permissions\nfor authorization"]
+        App["Laravel Application\nRoles & permissions\nfor authorization"]
     end
 
-    Redis[("🔴 Redis\nCached permissions\nand roles as SETs")]
-    DB[("🟦 Database\nSource of truth:\npermissions, roles,\nassignments")]
+    Redis[("Redis\nCached permissions\nand roles as SETs")]
+    DB[("Database\nSource of truth:\npermissions, roles,\nassignments")]
 
     User -- "HTTP requests" --> App
     App -- "Read: SISMEMBER, SMEMBERS\nWrite: warm / evict" --> Redis
@@ -131,33 +125,33 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    User["👤 Application User"]
+    User["Application User"]
 
     subgraph laravel ["Laravel Application"]
         direction TB
 
         subgraph entry ["Entry Points"]
-            MW["🛡️ Middleware\npermission · role\nrole_or_permission"]
-            BL["🖼️ Blade Directives\n@role · @permission\n@hasanyrole · ..."]
+            MW["Middleware\npermission · role\nrole_or_permission"]
+            BL["Blade Directives\n@role · @permission\n@hasanyrole · ..."]
         end
 
-        Trait["📦 HasRedisPermissions\nUser Model Trait\nassign · check · sync"]
+        Trait["HasRedisPermissions\nUser Model Trait\nassign · check · sync"]
 
         subgraph core ["Resolution & Cache"]
             direction LR
-            Resolver["⚙️ PermissionResolver\nIn-memory cache\nWildcard matching"]
-            Repo["🔌 RedisPermissionRepository\nSISMEMBER · SMEMBERS\nMULTI/EXEC atomicity"]
+            Resolver["PermissionResolver\nIn-memory cache\nWildcard matching"]
+            Repo["RedisPermissionRepository\nSISMEMBER · SMEMBERS\nMULTI/EXEC atomicity"]
         end
 
         subgraph sync ["Sync & Events"]
             direction LR
-            Manager["♻️ AuthorizationCacheManager\nwarmAll · warmUser\nevictUser · evictRole"]
-            Events["📡 CacheInvalidator\nRolesAssigned\nPermissionsSynced\nRoleDeleted"]
+            Manager["AuthorizationCacheManager\nwarmAll · warmUser\nevictUser · evictRole"]
+            Events["CacheInvalidator\nRolesAssigned\nPermissionsSynced\nRoleDeleted"]
         end
     end
 
-    Redis[("🔴 Redis\nSETs with TTL")]
-    DB[("🟦 Database\n5 tables")]
+    Redis[("Redis\nSETs with TTL")]
+    DB[("Database\n5 tables")]
 
     User -- "HTTP Request" --> MW
     User -- "Views" --> BL
@@ -176,9 +170,9 @@ flowchart TB
 ```mermaid
 flowchart TD
     A["hasPermissionTo('posts.edit')"] --> B{In-memory\ncache?}
-    B -- "Hit" --> C["✅ Return cached result"]
+    B -- "Hit" --> C["Return cached result"]
     B -- "Miss" --> D{"Redis\nSISMEMBER?"}
-    D -- "Hit" --> E["✅ Cache in memory\nand return"]
+    D -- "Hit" --> E["Cache in memory\nand return"]
     D -- "Miss" --> F{"User cache\nexists in Redis?"}
     F -- "Yes" --> K{"Wildcard\nenabled?"}
     F -- "No (cold start)" --> H["AuthorizationCacheManager\n::warmUser()"]
@@ -186,9 +180,9 @@ flowchart TD
     I --> J["Write merged SETs\nto Redis"]
     J --> D
 
-    K -- "No" --> L["❌ Permission denied"]
+    K -- "No" --> L["Permission denied"]
     K -- "Yes" --> M["fnmatch() scan\nall user perms"]
-    M -- "Match" --> N["✅ Return true"]
+    M -- "Match" --> N["Return true"]
     M -- "No match" --> L
 
 ```
@@ -205,7 +199,7 @@ flowchart TD
     B -- "UserDeleted" --> G["Evict user cache\nfrom Redis"]
     B -- "Login" --> H["Warm user cache\non authentication"]
 
-    D --> I["✅ Redis Updated"]
+    D --> I["Redis Updated"]
     E --> I
     F --> I
     G --> I
@@ -444,7 +438,7 @@ $user->getRoleNames();          // Collection<string>
 
 #### Query Scopes
 
-> **⚠️ Scopes run SQL, not Redis.** `scopeRole` and `scopePermission` issue database queries against the pivot tables and do **not** consult the Redis cache. Use them for reporting, admin dashboards, or any context where you need the full user list, not in hot authorization paths (`hasPermissionTo`, middleware, Blade). For a throughput-sensitive "which users have role X" lookup, call `$cacheManager->getUserIdsAffectedByPermission($name)` or the equivalent role-cache method, both of which read from Redis.
+> **Scopes run SQL, not Redis.** `scopeRole` and `scopePermission` issue database queries against the pivot tables and do **not** consult the Redis cache. Use them for reporting, admin dashboards, or any context where you need the full user list, not in hot authorization paths (`hasPermissionTo`, middleware, Blade). For a throughput-sensitive "which users have role X" lookup, call `$cacheManager->getUserIdsAffectedByPermission($name)` or the equivalent role-cache method, both of which read from Redis.
 
 ```php
 // Find users with a specific role (SQL query)
@@ -1334,7 +1328,7 @@ $this->app->singleton(
 
 ### Performance Benchmark
 
-A [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) compares both packages side by side, run with `php artisan bench:markdown 1,10,50 --warm=5 --runs=30` (Apple Silicon, PHP 8.x, predis, local Redis). Each "request" resets in-memory state, so neither package carries PHP process memory across requests (matching PHP-FPM, and Octane where this package resets its in-memory cache per request). The robust, hardware-independent result is the **query count** (4 queries hitting several tables versus 1). Wall-clock is modest and depends heavily on your database, so read the latency tables with that in mind.
+A [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) compares both packages side by side, run with `php artisan bench:markdown 1,10,50 --warm=5 --runs=30` (Apple Silicon, PHP 8.x, predis, local Redis). Each "request" resets in-memory state, so neither package carries PHP process memory across requests (matching PHP-FPM, and Octane where this package resets its in-memory cache per request). The hardware-independent result is the **query count** (4 queries hitting several tables versus 1). Wall-clock is modest and depends heavily on your database, so read the latency tables with that in mind.
 
 #### Database queries per authorization-heavy request
 
@@ -1623,53 +1617,7 @@ This package follows [Semantic Versioning](https://semver.org). The early 1.x th
 
 ## License
 
-This package is open-sourced software licensed under the **[MIT License](https://opensource.org/licenses/MIT)**.
-
-```
-MIT License
-
-Copyright (c) 2026 Sebastian Cabarcas
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-### Third-Party Licenses
-
-All runtime dependencies are MIT-licensed Laravel components:
-
-| Dependency | License |
-|---|---|
-| `illuminate/support` | MIT |
-| `illuminate/database` | MIT |
-| `illuminate/redis` | MIT |
-| `illuminate/events` | MIT |
-| `illuminate/auth` | MIT |
-
-All development dependencies are also open-source:
-
-| Dependency | License |
-|---|---|
-| `pestphp/pest` | MIT |
-| `phpstan/phpstan` | MIT |
-| `larastan/larastan` | MIT |
-| `laravel/pint` | MIT |
-| `orchestra/testbench` | MIT |
+This package is open-sourced software licensed under the [MIT License](LICENSE).
 
 ---
 

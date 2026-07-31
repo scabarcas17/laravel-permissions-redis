@@ -1,6 +1,6 @@
 {
     "name": "scabarcas/laravel-permissions-redis",
-    "description": "A Redis-powered roles and permissions package for Laravel designed to eliminate repetitive database queries and deliver high-performance authorization.",
+    "description": "Redis-backed roles and permissions for Laravel with a Spatie-compatible API and per-user cache invalidation.",
     "type": "library",
     "require": {
         "php": "^8.3",

@@ -163,7 +163,7 @@ return [
     |
     | When enabled, the package registers Blade directives:
     | @role, @hasanyrole, @hasallroles, @permission, @hasanypermission,
-    | @hasallpermissions — all resolved through Redis.
+    | @hasallpermissions. All of them resolve through Redis.
     |
     */
 
