@@ -81,10 +81,12 @@ class Role extends Model
         );
     }
 
-    /** @param array<string|int|BackedEnum> $permissions */
-    public function syncPermissions(array $permissions): static
+    /** @param string|int|array<string|int>|BackedEnum ...$permissions */
+    public function syncPermissions(mixed ...$permissions): static
     {
-        $this->permissions()->sync($this->resolvePermissionIds($permissions));
+        $permissions = is_array($permissions[0] ?? null) ? $permissions[0] : $permissions;
+
+        $this->permissions()->sync($this->resolvePermissionIds(collect($permissions)->flatten()->all()));
 
         event(new PermissionsSynced($this));
 
