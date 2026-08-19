@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-08-19
+
+Minor release: closes the two remaining functional gaps against Spatie's API
+listed in the README comparison, and adds PHP 8.5 to the CI matrix. No
+breaking changes.
+
+### Added
+
+- **`getDirectPermissions()` / `getPermissionsViaRoles()` on `HasRedisPermissions`.** Spatie-compatible getters for distinguishing directly assigned from role-inherited permissions at runtime. Both read the Eloquent relations (SQL), like the query scopes, and return `Permission` models rather than DTOs; permission *checks* keep resolving from the merged Redis set. Guard-scoped like the other getters (optional `$guard` parameter, `forGuard()` supported), filtering on each permission's own `guard_name`, which matches what the cache warmer encodes. Permissions granted by several roles are returned once.
+- **`permissions-redis:flush --force`.** Skips the confirmation prompt so the command can run in deploy scripts and CI, where the interactive prompt would answer "no" and silently leave the cache untouched.
+- **`php artisan about` section.** Shows the installed package version, Redis connection, key prefix, cache TTL, and the tenancy / wildcard / super admin status. Registered only when `AboutCommand` exists, since the package depends on `illuminate/*` components rather than the full framework.
+- **PHP 8.5 in the CI matrix.** Test rows for PHP 8.5 on Laravel 12 and 13, and the Redis 7 integration job now runs on 8.5. The composer constraint (`^8.3`) already allowed PHP 8.5; the full suite passes on 8.5 with no code changes.
+
+### Changed
+
+- **`syncPermissions()` is now variadic on the user trait and the `Role` model,** matching `syncRoles()`: `$user->syncPermissions('a', 'b')` works alongside the existing `syncPermissions(['a', 'b'])` array form. Calling it with no arguments removes every direct (or role) permission, consistent with `sync` semantics; previously the empty array had to be passed explicitly.
+
+### Docs
+
+- **Laravel 11 support is documented as best-effort.** The composer constraint allows Laravel 11, but CI only exercises Laravel 12 and 13 because the Pest 4 harness requires testbench 10+, which starts at Laravel 12. Laravel 11 has been EOL since March 2026; the constraint will be dropped in v5.
+- The `getAllPermissions()` README example still showed the `id` field removed from `PermissionDTO` in `4.0.0-beta.2`.
+- Migration guide: the direct-vs-role-inherited section and FAQ now point to the new getters instead of a raw pivot-table query workaround.
+
 ## [4.0.1] - 2026-07-31
 
 Patch release: cache-consistency fixes for role deletion and role permission
@@ -233,6 +256,7 @@ First stable release of `scabarcas/laravel-permissions-redis`.
 - **Test suite.** Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
 - **Documentation.** README with installation guide, usage examples, conventions, API reference, and C4 architecture diagrams.
 
+[4.1.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.1...v4.1.0
 [4.0.1]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.0...v4.0.1
 [4.0.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.0-beta.2...v4.0.0
 [4.0.0-beta.2]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.0-beta.1...v4.0.0-beta.2

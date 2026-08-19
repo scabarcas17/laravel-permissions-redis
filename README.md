@@ -62,9 +62,11 @@ Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permis
 
 | Dependency | Version | Purpose |
 |---|---|---|
-| **PHP** | `^8.3` | Minimum version the package is tested on |
+| **PHP** | `^8.3` | CI runs on 8.3, 8.4 and 8.5 |
 | **Laravel Framework** | `^11.0 \| ^12.0 \| ^13.0` | Host application |
 | **Redis extension** | `phpredis` or `predis` | Redis connectivity |
+
+> **Laravel 11 note:** the composer constraint allows Laravel 11, but CI only exercises Laravel 12 and 13 (the Pest 4 test harness requires testbench 10+, which starts at Laravel 12). Laravel 11 reached end of life in March 2026, so support is best-effort on the 4.x line and the constraint will be dropped in v5.
 
 ### PHP Extensions
 
@@ -634,9 +636,14 @@ php artisan permissions-redis:warm-user 42
 # Flush all authorization cache
 php artisan permissions-redis:flush
 
+# Flush without the confirmation prompt (deploy scripts, CI)
+php artisan permissions-redis:flush --force
+
 # View cache statistics
 php artisan permissions-redis:stats
 ```
+
+The package also registers a section in `php artisan about` with the installed version, Redis connection, key prefix, TTL, and whether tenancy, wildcards, and the super admin role are enabled.
 
 Both warm commands accept `--queue` to push the operation onto the queue instead of running it synchronously. This is the recommended approach for large user tables or post-deploy rewarms:
 
@@ -984,6 +991,8 @@ $user->givePermissionTo(Permission::CreatePost, Permission::EditPost);
 - **Role-based** (recommended for most cases): Assign permissions to roles, assign roles to users. Changes to a role affect all users with that role.
 - **Direct.** Assign permissions directly to a user for exceptions or overrides. Direct permissions are merged with role-inherited permissions.
 
+Permission checks always see the merged set. When business logic needs to distinguish the two sources at runtime, use `getDirectPermissions()` / `getPermissionsViaRoles()`; both read the Eloquent relations (SQL), not the Redis cache.
+
 ---
 
 ## API Reference
@@ -1014,19 +1023,26 @@ $user->hasAllRoles('admin', 'editor');                      // false (missing on
 
 | Method | Signature | Returns | Description |
 |---|---|---|---|
-| `getAllPermissions` | `getAllPermissions(?string $guard = null)` | `Collection<PermissionDTO>` | All permissions (direct + role-inherited) as DTOs |
-| `getPermissionNames` | `getPermissionNames(?string $guard = null)` | `Collection<string>` | Permission names only |
-| `getRoleNames` | `getRoleNames(?string $guard = null)` | `Collection<string>` | Role names |
+| `getAllPermissions` | `getAllPermissions(?string $guard = null)` | `Collection<PermissionDTO>` | All permissions (direct + role-inherited) as DTOs, from Redis |
+| `getPermissionNames` | `getPermissionNames(?string $guard = null)` | `Collection<string>` | Permission names only, from Redis |
+| `getRoleNames` | `getRoleNames(?string $guard = null)` | `Collection<string>` | Role names, from Redis |
+| `getDirectPermissions` | `getDirectPermissions(?string $guard = null)` | `Collection<Permission>` | Directly assigned permissions only, read from the database (SQL) |
+| `getPermissionsViaRoles` | `getPermissionsViaRoles(?string $guard = null)` | `Collection<Permission>` | Role-inherited permissions only, deduplicated, read from the database (SQL) |
 | `forGuard` | `forGuard(string $guard)` | `static` | Fluent guard scope (auto-resets after one call) |
 
 ```php
 $user->getAllPermissions();
-// Collection [PermissionDTO { name: 'posts.edit', id: 1, group: 'content', guard: 'web' }, ...]
+// Collection [PermissionDTO { name: 'posts.edit', group: 'content', guard: 'web' }, ...]
 
 $user->getPermissionNames();            // Collection ['posts.edit', 'posts.create']
 $user->getRoleNames();                  // Collection ['admin', 'editor']
 
 $user->forGuard('api')->getRoleNames(); // Collection ['api_consumer']
+
+// SQL reads (Eloquent relations), return Permission models, not DTOs.
+// For admin screens and business logic, not hot authorization paths.
+$user->getDirectPermissions();          // Collection [Permission { name: 'reports.export' }]
+$user->getPermissionsViaRoles();        // Collection [Permission { name: 'posts.edit' }, ...]
 ```
 
 ### `HasRedisPermissions` Trait: Assignment Methods
@@ -1038,7 +1054,7 @@ $user->forGuard('api')->getRoleNames(); // Collection ['api_consumer']
 | `removeRole` | `removeRole(mixed $role)` | `static` | Remove a specific role | `RolesAssigned` |
 | `givePermissionTo` | `givePermissionTo(mixed ...$permissions)` | `static` | Add direct permissions | none |
 | `revokePermissionTo` | `revokePermissionTo(mixed ...$permissions)` | `static` | Remove direct permissions | none |
-| `syncPermissions` | `syncPermissions(array $permissions)` | `static` | Replace all direct permissions | none |
+| `syncPermissions` | `syncPermissions(mixed ...$permissions)` | `static` | Replace all direct permissions | none |
 
 All assignment methods accept: `string`, `int` (ID), `BackedEnum`, `array`, or `Collection`.
 
@@ -1049,7 +1065,8 @@ $user->removeRole('editor');                    // removes 'editor'
 
 $user->givePermissionTo('reports.export');      // direct permission
 $user->revokePermissionTo('reports.export');    // revoke
-$user->syncPermissions(['reports.view']);        // replace all direct permissions
+$user->syncPermissions('reports.view');         // replace all direct permissions
+$user->syncPermissions(['reports.view']);       // array form works too
 ```
 
 ### `HasRedisPermissions` Trait: Relationships & Scopes
@@ -1072,7 +1089,7 @@ User::permission('posts.edit')->get();  // users who can edit posts (direct or v
 | Method | Signature | Returns | Event |
 |---|---|---|---|
 | `Role::findOrCreate` | `findOrCreate(string $name, string $guardName = 'web')` | `Role` | none |
-| `syncPermissions` | `syncPermissions(array $permissions)` | `static` | `PermissionsSynced` |
+| `syncPermissions` | `syncPermissions(mixed ...$permissions)` | `static` | `PermissionsSynced` |
 | `givePermissionTo` | `givePermissionTo(mixed ...$permissions)` | `static` | `PermissionsSynced` |
 | `revokePermissionTo` | `revokePermissionTo(mixed ...$permissions)` | `static` | `PermissionsSynced` |
 | `permissions` | `permissions()` | `BelongsToMany<Permission>` | none |
@@ -1080,7 +1097,7 @@ User::permission('posts.edit')->get();  // users who can edit posts (direct or v
 
 ```php
 $role = Role::findOrCreate('editor');
-$role->syncPermissions(['posts.create', 'posts.edit']);  // replace
+$role->syncPermissions('posts.create', 'posts.edit');    // replace (array form works too)
 $role->givePermissionTo('posts.publish');                // additive
 $role->revokePermissionTo('posts.publish');              // remove
 ```
@@ -1307,8 +1324,8 @@ $this->app->singleton(
 | **Querying** | | |
 | `hasRole` / `hasAnyRole` / `hasAllRoles` | ✅ | ✅ |
 | `hasPermissionTo` / `hasAnyPermission` / `hasAllPermissions` | ✅ | ✅ |
-| `getDirectPermissions()` | ✅ | ❌ |
-| `getPermissionsViaRoles()` | ✅ | ❌ |
+| `getDirectPermissions()` | ✅ | ✅ (SQL read) |
+| `getPermissionsViaRoles()` | ✅ | ✅ (SQL read) |
 | Query scopes (`scopeRole`, `scopePermission`) | ✅ | ✅ |
 | **Cache** | | |
 | Cache backend | Laravel Cache (any driver) | Redis directly (SET structures) |
@@ -1416,7 +1433,6 @@ See the [benchmark repository](https://github.com/scabarcas17/laravel-permission
 #### Stick with `spatie/laravel-permission` when:
 
 - **You don't run Redis.** This package requires Redis. If your infrastructure doesn't include it and you don't want to add it, Spatie works with any Laravel cache driver.
-- **You need `getDirectPermissions()` / `getPermissionsViaRoles()`.** If your business logic distinguishes between direct and role-inherited permissions at runtime, Spatie provides this natively. This package merges them.
 - **You need the teams feature.** Spatie's teams support is more mature than this package's multi-tenancy for certain team-based authorization patterns.
 - **You support older PHP/Laravel versions.** Spatie supports PHP 8.0+ and Laravel 8+. This package requires PHP 8.3+ and Laravel 11+.
 - **Authorization is not a bottleneck.** If your app has low traffic and few permission checks per request, the database-backed approach is perfectly adequate.
