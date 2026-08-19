@@ -35,7 +35,7 @@ Both packages share the same database schema (5 tables) and a very similar API. 
 | **Trait name** | `HasRoles` | `HasRedisPermissions` |
 | **Config file** | `config/permission.php` | `config/permissions-redis.php` |
 | **Namespace** | `Spatie\Permission\*` | `Scabarcas\LaravelPermissionsRedis\*` |
-| **Extra features** | Teams, direct/via-role separation | Wildcard permissions, super admin, Octane, multi-tenancy |
+| **Extra features** | Teams | Wildcard permissions, super admin, Octane, multi-tenancy |
 
 ---
 

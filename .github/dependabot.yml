@@ -1,0 +1,26 @@
+version: 2
+
+updates:
+  # PHP dependencies. No composer.lock is committed (this is a library), so
+  # PRs only open when a release falls outside the constraints in composer.json.
+  - package-ecosystem: composer
+    directory: "/"
+    schedule:
+      interval: weekly
+    # Widen instead of replace, so multi-major constraints like
+    # "^11.0|^12.0|^13.0" gain the new major without dropping the old ones.
+    versioning-strategy: widen
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Actions used in .github/workflows, grouped into a single weekly PR.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
