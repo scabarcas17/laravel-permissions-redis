@@ -44,10 +44,16 @@ jobs:
           - php: '8.4'
             laravel: '12.*'
             testbench: '10.*'
+          - php: '8.5'
+            laravel: '12.*'
+            testbench: '10.*'
           - php: '8.3'
             laravel: '13.*'
             testbench: '11.*'
           - php: '8.4'
+            laravel: '13.*'
+            testbench: '11.*'
+          - php: '8.5'
             laravel: '13.*'
             testbench: '11.*'
 
@@ -73,7 +79,7 @@ jobs:
 
   redis-integration:
     runs-on: ubuntu-latest
-    name: Redis Integration (Redis 7 + PHP 8.4)
+    name: Redis Integration (Redis 7 + PHP 8.5)
 
     services:
       redis:
@@ -92,7 +98,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           extensions: redis
           coverage: none
 
