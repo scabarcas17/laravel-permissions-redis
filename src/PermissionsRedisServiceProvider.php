@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Scabarcas\LaravelPermissionsRedis;
 
 use Closure;
+use Composer\InstalledVersions;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Container\BindingResolutionException;
+use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -63,6 +65,7 @@ class PermissionsRedisServiceProvider extends ServiceProvider
     {
         $this->publishAssets();
         $this->registerCommands();
+        $this->registerAboutCommand();
         $this->registerEventSubscriber();
 
         if (config('permissions-redis.register_gate', true)) {
@@ -118,6 +121,50 @@ class PermissionsRedisServiceProvider extends ServiceProvider
                 SeedCommand::class,
             ]);
         }
+    }
+
+    /**
+     * Contributes a section to `php artisan about`. Guarded because the
+     * package depends on illuminate/* components, not laravel/framework,
+     * so AboutCommand may be absent in bare skeletons.
+     */
+    private function registerAboutCommand(): void
+    {
+        if (!class_exists(AboutCommand::class)) {
+            return;
+        }
+
+        AboutCommand::add('Permissions Redis', function (): array {
+            $ttl = config('permissions-redis.ttl', 86400);
+
+            return [
+                'Version'          => $this->packageVersion(),
+                'Redis Connection' => $this->configString('permissions-redis.redis_connection', 'default'),
+                'Key Prefix'       => $this->configString('permissions-redis.prefix', 'auth:'),
+                'Cache TTL'        => sprintf('%d seconds', is_numeric($ttl) ? (int) $ttl : 86400),
+                'Tenancy'          => config('permissions-redis.tenancy.enabled') ? 'Enabled' : 'Disabled',
+                'Wildcards'        => config('permissions-redis.wildcard_permissions') ? 'Enabled' : 'Disabled',
+                'Super Admin Role' => $this->configString('permissions-redis.super_admin_role', 'Disabled'),
+            ];
+        });
+    }
+
+    private function packageVersion(): string
+    {
+        $package = 'scabarcas/laravel-permissions-redis';
+
+        if (class_exists(InstalledVersions::class) && InstalledVersions::isInstalled($package)) {
+            return InstalledVersions::getPrettyVersion($package) ?? 'unknown';
+        }
+
+        return 'unknown';
+    }
+
+    private function configString(string $key, string $default): string
+    {
+        $value = config($key);
+
+        return is_string($value) && $value !== '' ? $value : $default;
     }
 
     private function registerGateIntegration(): void

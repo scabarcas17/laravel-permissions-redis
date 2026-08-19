@@ -9,13 +9,14 @@ use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 
 class FlushCacheCommand extends Command
 {
-    protected $signature = 'permissions-redis:flush';
+    protected $signature = 'permissions-redis:flush
+                            {--force : Skip the confirmation prompt (for scripts and CI)}';
 
     protected $description = 'Flush all authorization cache entries from Redis';
 
     public function handle(PermissionRepositoryInterface $repository): int
     {
-        if (!$this->confirm('This will remove all authorization cache entries. Continue?')) {
+        if (!$this->option('force') && !$this->confirm('This will remove all authorization cache entries. Continue?')) {
             $this->info('Aborted.');
 
             return self::SUCCESS;

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Auth\Events\Login;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -174,4 +175,20 @@ test('registers blade directives when config enabled', function () {
     $compiled = Blade::compileString('@role("admin") @endrole');
 
     expect($compiled)->toContain('Blade::check');
+});
+
+test('registers a Permissions Redis section in artisan about', function () {
+    config()->set('permissions-redis.super_admin_role', 'super-admin');
+
+    // Assert against the raw buffer: about's two-column layout does not play
+    // well with PendingCommand's line-by-line output expectations.
+    $exitCode = Artisan::call('about');
+    $output = Artisan::output();
+
+    expect($exitCode)->toBe(0)
+        ->and($output)->toContain('Permissions Redis')
+        ->and($output)->toContain('Cache TTL')
+        ->and($output)->toContain('86400 seconds')
+        ->and($output)->toContain('Super Admin Role')
+        ->and($output)->toContain('super-admin');
 });
