@@ -297,10 +297,10 @@ php artisan permissions-redis:stats
 | `hasAllPermissions(...)` | `hasAllPermissions(...)` | Identical |
 | `getAllPermissions()` | `getAllPermissions()` | Returns `Collection<PermissionDTO>` instead of Eloquent Collection |
 | `getPermissionNames()` | `getPermissionNames()` | Identical |
-| `getDirectPermissions()` | N/A | Not available (all permissions are merged) |
-| `getPermissionsViaRoles()` | N/A | Not available |
-| `hasDirectPermission(...)` | N/A | Not available |
-| `hasPermissionViaRole(...)` | N/A | Not available |
+| `getDirectPermissions()` | `getDirectPermissions()` | Reads the database (SQL), returns `Permission` models |
+| `getPermissionsViaRoles()` | `getPermissionsViaRoles()` | Reads the database (SQL), returns `Permission` models |
+| `hasDirectPermission(...)` | N/A | Use `getDirectPermissions()->contains('name', $permission)` |
+| `hasPermissionViaRole(...)` | N/A | Use `getPermissionsViaRoles()->contains('name', $permission)` |
 | `roles()` | `roles()` | Identical (BelongsToMany) |
 | `permissions()` | `permissions()` | Identical (BelongsToMany) |
 | `scopeRole(...)` | `scopeRole(...)` | Identical |
@@ -321,7 +321,7 @@ php artisan permissions-redis:stats
 
 | Spatie | This package | Notes |
 |--------|-------------|-------|
-| `permission:cache-reset` | `permissions-redis:flush` | Flush cache |
+| `permission:cache-reset` | `permissions-redis:flush` | Flush cache (`--force` skips the prompt) |
 | `permission:create-role` | N/A | Use `Role::findOrCreate()` |
 | `permission:create-permission` | N/A | Use `Permission::findOrCreate()` |
 | `permission:show` | `permissions-redis:stats` | Cache statistics |
@@ -345,18 +345,12 @@ php artisan permissions-redis:stats
 - `getPermissionsViaRoles()` returns permissions inherited through roles
 - `hasDirectPermission()` checks only direct permissions
 
-**This package** merges all permissions (direct + role-based) into a single Redis SET per user. There is no runtime distinction. If you rely on `getDirectPermissions()` or `hasDirectPermission()`, you will need to refactor that logic.
+**This package** merges all permissions (direct + role-based) into a single Redis SET per user, so *checks* (`hasPermissionTo`, middleware, Blade, Gate) never distinguish the source. Since v4.1.0 both getters exist with the same names and return `Permission` models, but they read the Eloquent relations (SQL), not the Redis cache. Use them in admin screens and business logic, not in hot authorization paths.
 
-**Workaround:** Query the `model_has_permissions` pivot table directly:
+There is no `hasDirectPermission()`; check the collection instead:
 
 ```php
-use Illuminate\Support\Facades\DB;
-
-$directPermissionNames = DB::table('model_has_permissions')
-    ->join('permissions', 'permissions.id', '=', 'model_has_permissions.permission_id')
-    ->where('model_id', $user->id)
-    ->where('model_type', get_class($user))
-    ->pluck('permissions.name');
+$user->getDirectPermissions()->contains('name', 'reports.export');
 ```
 
 ### 3. Teams support
@@ -455,7 +449,7 @@ All existing permissions, roles, and assignments carry over. The migration comma
 
 ### What do I do if I use `getDirectPermissions()`?
 
-See [Behavior differences > Direct vs. role-based permission separation](#2-direct-vs-role-based-permission-separation) for a workaround using direct database queries.
+Nothing since v4.1.0: `getDirectPermissions()` and `getPermissionsViaRoles()` exist with the same names and return `Permission` models. The one difference from Spatie is that they read the database (SQL), not the Redis cache; see [Behavior differences > Direct vs. role-based permission separation](#2-direct-vs-role-based-permission-separation).
 
 ### What's the equivalent of Spatie's team feature?
 

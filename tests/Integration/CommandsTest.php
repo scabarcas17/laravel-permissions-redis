@@ -101,6 +101,16 @@ test('permissions-redis:flush clears all cache when confirmed', function () {
     expect($this->repo->getUserPermissions(1))->toBe([]);
 });
 
+test('permissions-redis:flush --force skips the confirmation prompt', function () {
+    $this->repo->setUserPermissions(1, ['test.perm']);
+
+    $this->artisan('permissions-redis:flush --force')
+        ->expectsOutputToContain('Authorization cache flushed')
+        ->assertSuccessful();
+
+    expect($this->repo->getUserPermissions(1))->toBe([]);
+});
+
 test('permissions-redis:flush aborts when not confirmed', function () {
     $this->repo->setUserPermissions(1, ['test.perm']);
 

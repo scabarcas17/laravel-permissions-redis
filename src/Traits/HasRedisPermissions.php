@@ -153,6 +153,52 @@ trait HasRedisPermissions
     }
 
     /**
+     * Permissions assigned directly to this user, read via the
+     * model_has_permissions pivot.
+     *
+     * NOTE: unlike getAllPermissions(), this reads the Eloquent relation
+     * (SQL), not the Redis cache, and returns Permission models instead
+     * of DTOs. Use it when business logic must distinguish direct from
+     * role-inherited permissions; avoid it in hot authorization paths.
+     *
+     * @return Collection<int, Permission>
+     */
+    public function getDirectPermissions(?string $guard = null): Collection
+    {
+        $override = $this->consumeGuardOverride();
+
+        return $this->permissions()
+            ->where('guard_name', $this->guardOrDefault($guard ?? $override))
+            ->get();
+    }
+
+    /**
+     * Permissions this user inherits through roles, read via the
+     * model_has_roles and role_has_permissions pivots.
+     *
+     * NOTE: unlike getAllPermissions(), this reads the Eloquent relations
+     * (SQL), not the Redis cache, and returns Permission models instead
+     * of DTOs. Permissions granted by more than one role appear once.
+     * Avoid it in hot authorization paths.
+     *
+     * @return Collection<int, Permission>
+     */
+    public function getPermissionsViaRoles(?string $guard = null): Collection
+    {
+        $override = $this->consumeGuardOverride();
+        $guardName = $this->guardOrDefault($guard ?? $override);
+
+        return $this->roles()
+            ->with('permissions')
+            ->get()
+            ->flatMap(fn (Role $role): Collection => $role->permissions->filter(
+                fn (Permission $permission): bool => $permission->guard_name === $guardName,
+            ))
+            ->unique('id')
+            ->values();
+    }
+
+    /**
      * @param string|int|array<string|int>|BackedEnum ...$roles
      */
     public function assignRole(mixed ...$roles): static
@@ -227,11 +273,13 @@ trait HasRedisPermissions
     }
 
     /**
-     * @param array<string|int|BackedEnum> $permissions
+     * @param string|int|array<string|int>|BackedEnum ...$permissions
      */
-    public function syncPermissions(array $permissions): static
+    public function syncPermissions(mixed ...$permissions): static
     {
         $guard = $this->consumeGuardOverride();
+        $permissions = is_array($permissions[0] ?? null) ? $permissions[0] : $permissions;
+
         $permissionIds = $this->resolvePermissionIds($permissions, $guard);
 
         $this->permissions()->sync($permissionIds);
@@ -346,6 +394,14 @@ trait HasRedisPermissions
         return $guard;
     }
 
+    private function guardOrDefault(?string $guard): string
+    {
+        /** @var string $guardName */
+        $guardName = $guard ?? config('auth.defaults.guard', 'web');
+
+        return $guardName;
+    }
+
     private function getPermissionResolver(): PermissionResolverInterface
     {
         /** @var PermissionResolverInterface $resolver */
@@ -361,10 +417,7 @@ trait HasRedisPermissions
      */
     private function resolveRoleIds(array $roles, ?string $guard = null): array
     {
-        /** @var string $defaultGuard */
-        $defaultGuard = $guard ?? config('auth.defaults.guard', 'web');
-
-        return $this->batchResolveRoleIds(collect($roles)->flatten()->all(), $defaultGuard);
+        return $this->batchResolveRoleIds(collect($roles)->flatten()->all(), $this->guardOrDefault($guard));
     }
 
     /**
@@ -374,10 +427,7 @@ trait HasRedisPermissions
      */
     private function resolvePermissionIds(array $permissions, ?string $guard = null): array
     {
-        /** @var string $defaultGuard */
-        $defaultGuard = $guard ?? config('auth.defaults.guard', 'web');
-
-        return $this->batchResolvePermissionIds(collect($permissions)->flatten()->all(), $defaultGuard);
+        return $this->batchResolvePermissionIds(collect($permissions)->flatten()->all(), $this->guardOrDefault($guard));
     }
 
     /**

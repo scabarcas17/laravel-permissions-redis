@@ -249,6 +249,101 @@ test('syncPermissions dispatches PermissionsAssigned event', function () {
     Event::assertDispatched(PermissionsAssigned::class);
 });
 
+test('syncPermissions accepts variadic arguments like syncRoles', function () {
+    Permission::create(['name' => 'special.access', 'guard_name' => 'web']);
+    $extraPerm = Permission::create(['name' => 'extra.access', 'guard_name' => 'web']);
+
+    $this->user->syncPermissions('special.access', 'extra.access');
+
+    expect($this->user->permissions()->pluck('name')->sort()->values()->all())
+        ->toBe(['extra.access', 'special.access']);
+
+    // Variadic and array forms are interchangeable
+    $this->user->syncPermissions('extra.access');
+
+    expect($this->user->permissions()->pluck('id')->all())->toBe([$extraPerm->id]);
+});
+
+test('syncPermissions with no arguments removes all direct permissions', function () {
+    Permission::create(['name' => 'special.access', 'guard_name' => 'web']);
+    $this->user->givePermissionTo('special.access');
+
+    $this->user->syncPermissions();
+
+    expect($this->user->permissions()->count())->toBe(0);
+});
+
+// ─── Direct vs role-inherited getters (SQL) ───
+
+test('getDirectPermissions returns only directly assigned permissions', function () {
+    Permission::create(['name' => 'special.access', 'guard_name' => 'web']);
+    $this->user->givePermissionTo('special.access');
+
+    $direct = $this->user->getDirectPermissions();
+
+    expect($direct)->toHaveCount(1)
+        ->and($direct->first())->toBeInstanceOf(Permission::class)
+        ->and($direct->first()->name)->toBe('special.access');
+});
+
+test('getDirectPermissions is empty when user only has role permissions', function () {
+    expect($this->user->getDirectPermissions())->toBeEmpty();
+});
+
+test('getPermissionsViaRoles returns role-inherited permissions only', function () {
+    Permission::create(['name' => 'special.access', 'guard_name' => 'web']);
+    $this->user->givePermissionTo('special.access');
+
+    $viaRoles = $this->user->getPermissionsViaRoles();
+
+    expect($viaRoles->pluck('name')->sort()->values()->all())
+        ->toBe(['users.create', 'users.delete', 'users.edit'])
+        ->and($viaRoles->first())->toBeInstanceOf(Permission::class);
+});
+
+test('getPermissionsViaRoles deduplicates permissions shared by multiple roles', function () {
+    // editorRole also grants users.edit, already granted via adminRole
+    $this->user->assignRole('editor');
+
+    $viaRoles = $this->user->getPermissionsViaRoles();
+
+    expect($viaRoles->pluck('name')->sort()->values()->all())
+        ->toBe(['users.create', 'users.delete', 'users.edit']);
+});
+
+test('getDirectPermissions and getPermissionsViaRoles respect the guard', function () {
+    Permission::create(['name' => 'api.access', 'guard_name' => 'api']);
+    $apiRole = Role::create(['name' => 'api_admin', 'guard_name' => 'api']);
+    $apiRole->givePermissionTo('api.access');
+
+    $this->user->forGuard('api')->givePermissionTo('api.access');
+    DB::table('model_has_roles')->insert([
+        'role_id'    => $apiRole->id,
+        'model_id'   => $this->user->id,
+        'model_type' => User::class,
+    ]);
+
+    expect($this->user->getDirectPermissions()->pluck('name')->all())->toBe([])
+        ->and($this->user->getDirectPermissions('api')->pluck('name')->all())->toBe(['api.access'])
+        ->and($this->user->forGuard('api')->getDirectPermissions()->pluck('name')->all())->toBe(['api.access'])
+        ->and($this->user->getPermissionsViaRoles()->pluck('name')->all())
+        ->not->toContain('api.access')
+        ->and($this->user->getPermissionsViaRoles('api')->pluck('name')->all())->toBe(['api.access']);
+});
+
+test('direct plus via-roles permissions match the Redis-backed getAllPermissions', function () {
+    Permission::create(['name' => 'special.access', 'guard_name' => 'web']);
+    $this->user->givePermissionTo('special.access');
+
+    $sqlView = $this->user->getDirectPermissions()->pluck('name')
+        ->merge($this->user->getPermissionsViaRoles()->pluck('name'))
+        ->unique()->sort()->values()->all();
+
+    $redisView = $this->user->getAllPermissions()->pluck('name')->sort()->values()->all();
+
+    expect($sqlView)->toBe($redisView);
+});
+
 // ─── Relationships ───
 
 test('roles relationship returns BelongsToMany', function () {

@@ -33,6 +33,22 @@ test('Role syncPermissions replaces all permissions and dispatches event', funct
     Event::assertDispatched(PermissionsSynced::class);
 });
 
+test('Role syncPermissions accepts variadic arguments like the user trait', function () {
+    $role = Role::create(['name' => 'editor', 'guard_name' => 'web']);
+    Permission::findOrCreate('posts.create');
+    Permission::findOrCreate('posts.edit');
+
+    $role->syncPermissions('posts.create', 'posts.edit');
+
+    expect($role->permissions()->pluck('name')->sort()->values()->all())
+        ->toBe(['posts.create', 'posts.edit']);
+
+    // No arguments removes every permission from the role
+    $role->syncPermissions();
+
+    expect($role->permissions()->count())->toBe(0);
+});
+
 test('Role givePermissionTo adds permissions without removing existing', function () {
     Event::fake([PermissionsSynced::class]);
 
