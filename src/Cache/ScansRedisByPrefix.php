@@ -21,18 +21,31 @@ trait ScansRedisByPrefix
     protected function scanByPattern(Connection $connection, string $pattern, callable $onBatch): void
     {
         $connectionPrefix = $this->connectionPrefix($connection);
-        $cursor = '0';
+
+        // Start from a null cursor: phpredis treats a 0 / "0" iterator as an
+        // already exhausted scan and returns false without asking the server.
+        $cursor = null;
 
         do {
-            /** @var array{0: string|int, 1: array<string>} $result */
-            $result = $connection->scan($cursor, ['MATCH' => $connectionPrefix . $pattern, 'COUNT' => 100]); // @phpstan-ignore argument.type
-            $cursor = (string) $result[0];
-            $keys = $this->stripConnectionPrefix($result[1], $connectionPrefix);
+            // Option keys must be lowercase: PhpRedisConnection::scan() only
+            // reads 'match' / 'count' and silently scans '*' otherwise, while
+            // predis accepts either case.
+            /** @var array{0: int|string, 1: array<string>}|false $result */
+            $result = $connection->scan($cursor, ['match' => $connectionPrefix . $pattern, 'count' => 100]); // @phpstan-ignore argument.type
+
+            // phpredis (through Laravel) answers false when the scan finishes
+            // without a final batch of keys.
+            if ($result === false) {
+                break;
+            }
+
+            [$cursor, $keys] = $result;
+            $keys = $this->stripConnectionPrefix($keys, $connectionPrefix);
 
             if ($keys !== []) {
                 $onBatch($keys);
             }
-        } while ($cursor !== '0');
+        } while ((string) $cursor !== '0');
     }
 
     protected function connectionPrefix(Connection $connection): string

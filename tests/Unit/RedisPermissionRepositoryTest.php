@@ -217,7 +217,7 @@ test('deleteRoleCache deletes both permissions and users keys', function () {
 test('flushAll scans and deletes all keys with prefix', function () {
     $this->connection->shouldReceive('client')->andReturn(new stdClass());
     $this->connection->shouldReceive('scan')
-        ->with('0', ['MATCH' => 'auth:*', 'COUNT' => 100])
+        ->with(null, ['match' => 'auth:*', 'count' => 100])
         ->once()
         ->andReturn(['42', ['auth:user:1:permissions', 'auth:user:1:roles']]);
 
@@ -226,7 +226,7 @@ test('flushAll scans and deletes all keys with prefix', function () {
         ->once();
 
     $this->connection->shouldReceive('scan')
-        ->with('42', ['MATCH' => 'auth:*', 'COUNT' => 100])
+        ->with('42', ['match' => 'auth:*', 'count' => 100])
         ->once()
         ->andReturn(['0', []]);
 
@@ -236,11 +236,48 @@ test('flushAll scans and deletes all keys with prefix', function () {
 test('flushAll handles empty scan result', function () {
     $this->connection->shouldReceive('client')->andReturn(new stdClass());
     $this->connection->shouldReceive('scan')
-        ->with('0', ['MATCH' => 'auth:*', 'COUNT' => 100])
+        ->with(null, ['match' => 'auth:*', 'count' => 100])
         ->once()
         ->andReturn(['0', []]);
 
     $this->connection->shouldNotReceive('command')->with('del', Mockery::any());
+
+    $this->repository->flushAll();
+});
+
+test('flushAll stops when scan answers false (phpredis exhausted scan)', function () {
+    // PhpRedisConnection::scan() returns false instead of [0, []] when the
+    // scan finishes without a final batch of keys.
+    $this->connection->shouldReceive('client')->andReturn(new stdClass());
+    $this->connection->shouldReceive('scan')
+        ->with(null, ['match' => 'auth:*', 'count' => 100])
+        ->once()
+        ->andReturn(false);
+
+    $this->connection->shouldNotReceive('command')->with('del', Mockery::any());
+
+    $this->repository->flushAll();
+});
+
+test('flushAll handles the integer cursor returned by phpredis', function () {
+    $this->connection->shouldReceive('client')->andReturn(new stdClass());
+    $this->connection->shouldReceive('scan')
+        ->with(null, ['match' => 'auth:*', 'count' => 100])
+        ->once()
+        ->andReturn([17, ['auth:user:1:permissions']]);
+
+    $this->connection->shouldReceive('command')
+        ->with('del', ['auth:user:1:permissions'])
+        ->once();
+
+    $this->connection->shouldReceive('scan')
+        ->with(17, ['match' => 'auth:*', 'count' => 100])
+        ->once()
+        ->andReturn([0, ['auth:user:2:permissions']]);
+
+    $this->connection->shouldReceive('command')
+        ->with('del', ['auth:user:2:permissions'])
+        ->once();
 
     $this->repository->flushAll();
 });

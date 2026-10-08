@@ -207,7 +207,7 @@ test('permissions-redis:stats displays cache statistics', function () {
 
     $connection->shouldReceive('client')->andReturn(new stdClass());
     $connection->shouldReceive('scan')
-        ->with('0', ['MATCH' => 'auth:*', 'COUNT' => 100])
+        ->with(null, ['match' => 'auth:*', 'count' => 100])
         ->once()
         ->andReturn(['0', [
             'auth:user:1:permissions',
