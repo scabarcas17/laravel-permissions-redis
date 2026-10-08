@@ -393,7 +393,7 @@ test('setPermissionGroups returns early when groups is empty', function () {
 
 test('getPermissionGroups fetches via HMGET and maps nulls', function () {
     $this->connection->shouldReceive('command')
-        ->with('hmget', ['auth:permission_groups', 'web|users.create', 'web|posts.edit'])
+        ->with('hmget', ['auth:permission_groups', ['web|users.create', 'web|posts.edit']])
         ->once()
         ->andReturn(['User Management', null]);
 
@@ -405,6 +405,67 @@ test('getPermissionGroups fetches via HMGET and maps nulls', function () {
     ]);
 });
 
+test('getPermissionGroups passes the HMGET fields as a single array argument', function () {
+    // phpredis exposes hMGet(string $key, array $fields): spreading the fields
+    // into separate arguments throws a TypeError / ArgumentCountError there.
+    $this->connection->shouldReceive('command')
+        ->withArgs(fn (string $command, array $parameters): bool => $command === 'hmget'
+            && count($parameters) === 2
+            && $parameters[0] === 'auth:permission_groups'
+            && $parameters[1] === ['web|a', 'web|b', 'web|c'])
+        ->once()
+        ->andReturn(['Alpha', 'Beta', null]);
+
+    expect($this->repository->getPermissionGroups(['web|a', 'web|b', 'web|c']))->toBe([
+        'web|a' => 'Alpha',
+        'web|b' => 'Beta',
+        'web|c' => null,
+    ]);
+});
+
+test('getPermissionGroups maps a phpredis-style reply keyed by field with false for misses', function () {
+    $this->connection->shouldReceive('command')
+        ->with('hmget', ['auth:permission_groups', ['web|users.create', 'web|posts.edit', 'web|missing']])
+        ->once()
+        ->andReturn([
+            'web|users.create' => 'User Management',
+            'web|posts.edit'   => 'Content',
+            'web|missing'      => false,
+        ]);
+
+    $result = $this->repository->getPermissionGroups(['web|users.create', 'web|posts.edit', 'web|missing']);
+
+    expect($result)->toBe([
+        'web|users.create' => 'User Management',
+        'web|posts.edit'   => 'Content',
+        'web|missing'      => null,
+    ]);
+});
+
+test('getPermissionGroups deduplicates fields so a field-keyed reply stays aligned', function () {
+    $this->connection->shouldReceive('command')
+        ->with('hmget', ['auth:permission_groups', ['web|a', 'web|b']])
+        ->once()
+        ->andReturn(['web|a' => 'Alpha', 'web|b' => 'Beta']);
+
+    expect($this->repository->getPermissionGroups(['web|a', 'web|a', 'web|b']))->toBe([
+        'web|a' => 'Alpha',
+        'web|b' => 'Beta',
+    ]);
+});
+
+test('getPermissionGroups returns null for every field when HMGET answers false', function () {
+    $this->connection->shouldReceive('command')
+        ->with('hmget', ['auth:permission_groups', ['web|a', 'web|b']])
+        ->once()
+        ->andReturn(false);
+
+    expect($this->repository->getPermissionGroups(['web|a', 'web|b']))->toBe([
+        'web|a' => null,
+        'web|b' => null,
+    ]);
+});
+
 test('getPermissionGroups returns empty array for empty input', function () {
     $this->connection->shouldNotReceive('command');
 
@@ -413,7 +474,7 @@ test('getPermissionGroups returns empty array for empty input', function () {
 
 test('getPermissionGroups treats empty string as null', function () {
     $this->connection->shouldReceive('command')
-        ->with('hmget', ['auth:permission_groups', 'web|x'])
+        ->with('hmget', ['auth:permission_groups', ['web|x']])
         ->once()
         ->andReturn(['']);
 
