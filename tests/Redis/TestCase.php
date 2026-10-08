@@ -19,6 +19,12 @@ abstract class TestCase extends OrchestraTestCase
     {
         parent::setUp();
 
+        if (!$this->clientAvailable()) {
+            $this->markTestSkipped(
+                'PERMISSIONS_REDIS_TEST_CLIENT=phpredis requires the redis extension (phpredis).'
+            );
+        }
+
         if (!$this->redisAvailable()) {
             $this->markTestSkipped(
                 'Redis server not available at ' . $this->redisHost() . ':' . $this->redisPort() .
@@ -33,7 +39,7 @@ abstract class TestCase extends OrchestraTestCase
 
     protected function tearDown(): void
     {
-        if ($this->redisAvailable()) {
+        if ($this->clientAvailable() && $this->redisAvailable()) {
             $this->flushTestKeys();
         }
 
@@ -54,7 +60,7 @@ abstract class TestCase extends OrchestraTestCase
             'prefix'   => '',
         ]);
 
-        $app['config']->set('database.redis.client', 'predis');
+        $app['config']->set('database.redis.client', $this->redisClient());
         $app['config']->set('database.redis.default', [
             'host'     => $this->redisHost(),
             'port'     => $this->redisPort(),
@@ -73,18 +79,61 @@ abstract class TestCase extends OrchestraTestCase
     {
         /** @var \Illuminate\Redis\Connections\Connection $connection */
         $connection = Redis::connection('default');
-        $cursor = '0';
+
+        // SCAN MATCH is a raw server-side pattern: neither client prepends the
+        // configured key prefix to it, and the returned keys carry that prefix,
+        // so it is added to the pattern here and stripped before DEL re-adds it.
+        $clientPrefix = $this->clientPrefix();
+
+        // The connection-level scan() is the client-agnostic entry point (the
+        // raw SCAN signatures of predis and phpredis differ). The cursor must
+        // start as null: phpredis treats 0 / "0" as an already finished scan.
+        $cursor = null;
 
         do {
-            /** @var array{0: string, 1: array<string>} $result */
-            $result = $connection->command('scan', [$cursor, 'match', self::TEST_PREFIX . '*', 'count', 500]);
-            $cursor = $result[0];
-            $keys = $result[1];
+            /** @var array{0: int|string, 1: array<string>}|false $result */
+            $result = $connection->scan($cursor, ['match' => $clientPrefix . self::TEST_PREFIX . '*', 'count' => 500]);
+
+            if ($result === false) {
+                break;
+            }
+
+            [$cursor, $keys] = $result;
+
+            if ($clientPrefix !== '') {
+                $length = strlen($clientPrefix);
+                $keys = array_map(
+                    static fn (string $key): string => str_starts_with($key, $clientPrefix) ? substr($key, $length) : $key,
+                    $keys,
+                );
+            }
 
             if ($keys !== []) {
                 $connection->command('del', $keys);
             }
-        } while ($cursor !== '0');
+        } while ((string) $cursor !== '0');
+    }
+
+    private function clientPrefix(): string
+    {
+        /** @var string|null $prefix */
+        $prefix = config('database.redis.options.prefix');
+
+        return $prefix ?? '';
+    }
+
+    /**
+     * Client driver under test: "predis" (default) or "phpredis". CI runs the
+     * suite with both, since their argument and reply shapes differ.
+     */
+    private function redisClient(): string
+    {
+        return (string) (getenv('PERMISSIONS_REDIS_TEST_CLIENT') ?: 'predis');
+    }
+
+    private function clientAvailable(): bool
+    {
+        return $this->redisClient() !== 'phpredis' || extension_loaded('redis');
     }
 
     private function redisAvailable(): bool

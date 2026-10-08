@@ -34,6 +34,21 @@ vendor/bin/pest tests/Unit/PermissionResolverTest.php
 vendor/bin/pest --filter="it can assign a role"
 ```
 
+The `tests/Redis/` contract suite talks to a real Redis server and is skipped
+automatically when nothing listens on `127.0.0.1:6379`. It uses `predis` by
+default; run it with `phpredis` as well, since the two clients differ in
+argument and reply shapes:
+
+```bash
+# Redis contract suite with predis (default) and with phpredis
+vendor/bin/pest --testsuite Redis
+PERMISSIONS_REDIS_TEST_CLIENT=phpredis vendor/bin/pest --testsuite Redis
+```
+
+Environment overrides: `PERMISSIONS_REDIS_TEST_HOST`, `PERMISSIONS_REDIS_TEST_PORT`,
+`PERMISSIONS_REDIS_TEST_DB` (defaults to `15`), `PERMISSIONS_REDIS_TEST_CLIENT`
+(`predis` or `phpredis`) and `PERMISSIONS_REDIS_TEST_SKIP=1`.
+
 ### Code Style
 
 This project uses [Laravel Pint](https://laravel.com/docs/pint) for code formatting:

@@ -258,12 +258,23 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         $connection = $this->connection();
         $key = $this->permissionGroupsKey();
 
-        /** @var array<int, string|null> $values */
-        $values = $connection->command('hmget', [$key, ...$encodedNames]);
+        // Deduplicate so the positional mapping below holds for phpredis,
+        // whose reply is keyed by field name and collapses repeated fields.
+        $fields = array_values(array_unique($encodedNames));
+
+        // The field list must travel as ONE array argument: phpredis exposes
+        // hMGet(string $key, array $fields) and rejects spread fields with a
+        // TypeError / ArgumentCountError, while predis flattens the array itself.
+        /** @var array<int|string, string|false|null>|false $values */
+        $values = $connection->command('hmget', [$key, $fields]);
+
+        // predis answers with a positional list, phpredis with a map keyed by
+        // field (false for missing fields). Both preserve the requested order.
+        $values = is_array($values) ? array_values($values) : [];
 
         $result = [];
 
-        foreach ($encodedNames as $index => $encodedName) {
+        foreach ($fields as $index => $encodedName) {
             $raw = $values[$index] ?? null;
             $result[$encodedName] = is_string($raw) && $raw !== '' ? $raw : null;
         }

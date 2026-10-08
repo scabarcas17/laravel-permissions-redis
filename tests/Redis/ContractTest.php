@@ -109,6 +109,30 @@ test('flushAll removes every key under the configured prefix', function () {
         ->and($this->repo->getRoleUserIds(61))->toBe([]);
 });
 
+test('flushAll leaves keys outside the package prefix untouched', function () {
+    /** @var \Illuminate\Redis\Connections\Connection $connection */
+    $connection = \Illuminate\Support\Facades\Redis::connection('default');
+    $foreignKey = 'lpr_contract_foreign:key';
+
+    $connection->command('set', [$foreignKey, '1']);
+    $this->repo->setUserPermissions(62, ['web|x']);
+
+    try {
+        $this->repo->flushAll();
+
+        expect((bool) $connection->command('exists', [$foreignKey]))->toBeTrue()
+            ->and($this->repo->userCacheExists(62))->toBeFalse();
+    } finally {
+        $connection->command('del', [$foreignKey]);
+    }
+});
+
+test('flushAll on an empty cache is a no-op', function () {
+    $this->repo->flushAll();
+
+    expect($this->repo->userCacheExists(63))->toBeFalse();
+});
+
 // ─── Permission groups (HSET since Redis 4.0) ───
 
 test('setPermissionGroups stores non-null groups and deletes nulls in a single transaction', function () {
@@ -154,6 +178,25 @@ test('deletePermissionGroup removes a single field', function () {
 
     expect($this->repo->getPermissionGroups(['web|a', 'web|b']))
         ->toBe(['web|a' => null, 'web|b' => 'Beta']);
+});
+
+// ─── Resolver end-to-end: names + groups through the real repository ───
+
+test('getAllPermissions resolves names and groups through the real repository', function () {
+    $this->repo->setUserPermissions(80, ['web|users.create', 'web|posts.edit']);
+    $this->repo->setPermissionGroups(['web|users.create' => 'User Management']);
+
+    /** @var \Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface $resolver */
+    $resolver = app(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class);
+
+    $permissions = $resolver->getAllPermissions(80)
+        ->map(fn (\Scabarcas\LaravelPermissionsRedis\DTO\PermissionDTO $dto): array => [$dto->name, $dto->group, $dto->guard])
+        ->all();
+
+    expect($permissions)->toEqualCanonicalizing([
+        ['users.create', 'User Management', 'web'],
+        ['posts.edit', null, 'web'],
+    ]);
 });
 
 // ─── TTL is set ───
