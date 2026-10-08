@@ -79,7 +79,11 @@ jobs:
 
   redis-integration:
     runs-on: ubuntu-latest
-    name: Redis Integration (Redis 7 + PHP 8.5)
+    strategy:
+      fail-fast: false
+      matrix:
+        client: [predis, phpredis]
+    name: Redis Integration (Redis 7 + PHP 8.5 + ${{ matrix.client }})
 
     services:
       redis:
@@ -110,10 +114,15 @@ jobs:
         env:
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: 6379
+          PERMISSIONS_REDIS_TEST_CLIENT: ${{ matrix.client }}
 
   redis6-integration:
     runs-on: ubuntu-latest
-    name: Redis Integration (Redis 6 + PHP 8.3)
+    strategy:
+      fail-fast: false
+      matrix:
+        client: [predis, phpredis]
+    name: Redis Integration (Redis 6 + PHP 8.3 + ${{ matrix.client }})
 
     services:
       redis:
@@ -144,6 +153,7 @@ jobs:
         env:
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: 6379
+          PERMISSIONS_REDIS_TEST_CLIENT: ${{ matrix.client }}
 
   coverage:
     runs-on: ubuntu-latest
