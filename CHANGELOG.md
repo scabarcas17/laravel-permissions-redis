@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`getAllPermissions()` threw under phpredis.** `RedisPermissionRepository::getPermissionGroups()` spread the HMGET fields into separate arguments. predis accepts that shape, but phpredis exposes `hMGet(string $key, array $fields)` and rejects it with an `ArgumentCountError` (two or more permissions) or a `TypeError` (a single one), so every `getAllPermissions()` / `getPermissionNames()` call failed on installations using the `phpredis` client, and applications wrapping the call defensively saw users with no permissions at all. `hasPermission()` was not affected. The fields now travel as a single array (the shape Laravel's own `PhpRedisConnection::hmget()` uses) and the reply is normalised: predis answers with a positional list, phpredis with a map keyed by field and `false` for missing fields.
+- **`flushAll()`, `permissions-redis:flush` and `permissions-redis:stats` were silent no-ops under phpredis.** The shared SCAN helper started from a `"0"` cursor, which phpredis treats as an already finished scan and answers with `false` without querying the server, and passed `MATCH` / `COUNT` in upper case, which `PhpRedisConnection::scan()` ignores in favour of `*`. The helper now starts from a `null` cursor, uses lower-case option keys (accepted by both clients) and handles the `false` reply. Fixing the cursor alone would have turned `flushAll()` into a delete of every key in the database, so both changes ship together with a contract test asserting that keys outside the package prefix survive.
+
+### Added
+
+- **The Redis contract suite runs against both clients in CI.** `tests/Redis/` hard-coded `predis`, which is why neither bug surfaced even though CI installs the `redis` extension. New `PERMISSIONS_REDIS_TEST_CLIENT` env override (`predis`, the default, or `phpredis`); the two Redis integration jobs now run once per client, and the suite's own key cleanup is client-agnostic.
+
 ## [4.1.0] - 2026-08-19
 
 Minor release: closes the two remaining functional gaps against Spatie's API
