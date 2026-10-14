@@ -543,3 +543,22 @@ test('getAllPermissions refetches groups on each call so cross-user group update
     expect($first->first()->group)->toBe('First Group')
         ->and($second->first()->group)->toBe('Second Group');
 });
+
+test('warm cooldown timestamps are evicted like the other per-user caches', function () {
+    config()->set('permissions-redis.resolver_cache_limit', 3);
+    config()->set('permissions-redis.resolver_warm_cooldown', 60.0);
+
+    for ($i = 1; $i <= 5; $i++) {
+        $this->repository->shouldReceive('userCacheExists')->with($i)->andReturn(false);
+        $this->repository->shouldReceive('userHasPermission')->with($i, 'web|x')->andReturn(false);
+        $this->cacheManager->shouldReceive('warmUser')->with($i)->once();
+
+        $this->resolver->hasPermission($i, 'x');
+    }
+
+    $attempts = (new ReflectionProperty($this->resolver, 'warmAttempts'))->getValue($this->resolver);
+
+    expect(count($attempts))->toBeLessThanOrEqual(3)
+        ->and(array_key_exists(5, $attempts))->toBeTrue()
+        ->and(array_key_exists(1, $attempts))->toBeFalse();
+});
