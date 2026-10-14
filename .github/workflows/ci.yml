@@ -83,7 +83,16 @@ jobs:
       fail-fast: false
       matrix:
         client: [predis, phpredis]
-    name: Redis Integration (Redis 7 + PHP 8.5 + ${{ matrix.client }})
+        # Both supported majors: PredisConnection differs between them (13 maps
+        # a null SCAN cursor to 0, 12 passes it through), which is how 4.1.1
+        # shipped a predis regression that only Laravel 12 users hit.
+        laravel: ['12.*', '13.*']
+        include:
+          - laravel: '12.*'
+            testbench: '10.*'
+          - laravel: '13.*'
+            testbench: '11.*'
+    name: Redis Integration (Redis 7 + PHP 8.5 + Laravel ${{ matrix.laravel }} + ${{ matrix.client }})
 
     services:
       redis:
@@ -107,7 +116,9 @@ jobs:
           coverage: none
 
       - name: Install dependencies
-        run: composer install --no-progress --prefer-dist
+        run: |
+          composer require "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" --no-update
+          composer install --no-progress --prefer-dist
 
       - name: Run tests with Redis
         run: vendor/bin/pest
