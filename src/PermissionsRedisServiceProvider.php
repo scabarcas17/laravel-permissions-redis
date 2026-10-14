@@ -24,6 +24,7 @@ use Scabarcas\LaravelPermissionsRedis\Commands\MigrateFromSpatieCommand;
 use Scabarcas\LaravelPermissionsRedis\Commands\SeedCommand;
 use Scabarcas\LaravelPermissionsRedis\Commands\WarmCacheCommand;
 use Scabarcas\LaravelPermissionsRedis\Commands\WarmUserCacheCommand;
+use Scabarcas\LaravelPermissionsRedis\Concerns\ResolvesUserModels;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
 use Scabarcas\LaravelPermissionsRedis\Listeners\CacheInvalidator;
@@ -33,10 +34,11 @@ use Scabarcas\LaravelPermissionsRedis\Middleware\RoleMiddleware;
 use Scabarcas\LaravelPermissionsRedis\Middleware\RoleOrPermissionMiddleware;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
 use Scabarcas\LaravelPermissionsRedis\Resolver\PermissionResolver;
-use Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions;
 
 class PermissionsRedisServiceProvider extends ServiceProvider
 {
+    use ResolvesUserModels;
+
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/permissions-redis.php', 'permissions-redis');
@@ -87,6 +89,8 @@ class PermissionsRedisServiceProvider extends ServiceProvider
         if (config('permissions-redis.octane.reset_on_request', false)) {
             $this->registerOctaneReset();
         }
+
+        $this->registerQueueReset();
     }
 
     private function publishAssets(): void
@@ -170,19 +174,7 @@ class PermissionsRedisServiceProvider extends ServiceProvider
     private function registerGateIntegration(): void
     {
         Gate::before(function (Authenticatable $user, string $ability): ?bool {
-            $userModels = $this->configuredUserModels();
-
-            $matches = false;
-
-            foreach ($userModels as $userModel) {
-                if ($user instanceof $userModel) {
-                    $matches = true;
-
-                    break;
-                }
-            }
-
-            if (!$matches) {
+            if (!$this->isConfiguredUserModel($user)) {
                 return null;
             }
 
@@ -218,22 +210,6 @@ class PermissionsRedisServiceProvider extends ServiceProvider
         }
 
         return $auth->getDefaultDriver();
-    }
-
-    /**
-     * @return array<string>
-     */
-    private function configuredUserModels(): array
-    {
-        $model = config('permissions-redis.user_model', 'App\\Models\\User');
-
-        if (is_array($model)) {
-            /** @var array<string> $model */
-            return array_values($model);
-        }
-
-        /** @var string $model */
-        return [$model];
     }
 
     /**
@@ -312,16 +288,41 @@ class PermissionsRedisServiceProvider extends ServiceProvider
         }
 
         Event::listen($requestReceived, function (): void {
-            /** @var PermissionResolverInterface $resolver */
-            $resolver = $this->app->make(PermissionResolverInterface::class);
-            $resolver->flush();
-
-            /** @var RedisPermissionRepository $repository */
-            $repository = $this->app->make(RedisPermissionRepository::class);
-            $repository->resetState();
-
-            HasRedisPermissions::flushRoleIdNameCache();
-            Role::flushRewarmAttempts();
+            $this->resetInMemoryState();
         });
+    }
+
+    /**
+     * Queue workers keep the container, and so the resolver singleton, alive
+     * across jobs. Without a reset a worker would keep answering from
+     * in-memory state that another process may have changed since the
+     * previous job. Redis stays warm; only the per-process memos go, the
+     * same reset Octane gets per request.
+     */
+    private function registerQueueReset(): void
+    {
+        $jobProcessing = 'Illuminate\Queue\Events\JobProcessing';
+
+        if (!class_exists($jobProcessing)) {
+            return;
+        }
+
+        Event::listen($jobProcessing, function (): void {
+            $this->resetInMemoryState();
+        });
+    }
+
+    private function resetInMemoryState(): void
+    {
+        /** @var PermissionResolverInterface $resolver */
+        $resolver = $this->app->make(PermissionResolverInterface::class);
+        $resolver->flush();
+
+        /** @var RedisPermissionRepository $repository */
+        $repository = $this->app->make(RedisPermissionRepository::class);
+        $repository->resetState();
+
+        Role::flushIdNameCache();
+        Role::flushRewarmAttempts();
     }
 }

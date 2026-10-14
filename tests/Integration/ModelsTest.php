@@ -275,3 +275,79 @@ test('Permission deleted hook removes group metadata from Redis hash', function 
     expect($repo->getPermissionGroups(['web|users.create']))
         ->toBe(['web|users.create' => null]);
 });
+
+test('Role users() ignores pivot rows of other model types', function () {
+    $role = Role::create(['name' => 'admin', 'guard_name' => 'web']);
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+
+    // Another model sharing the users table (and so the ID space) holds the role; the User does not.
+    DB::table('model_has_roles')->insert([
+        'role_id'    => $role->id,
+        'model_id'   => $user->id,
+        'model_type' => \Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\AdminUser::class,
+    ]);
+
+    expect($role->users()->count())->toBe(0);
+});
+
+test('Role users() targets the first configured model when user_model is an array', function () {
+    config()->set('permissions-redis.user_model', [
+        User::class,
+        \Scabarcas\LaravelPermissionsRedis\Tests\Fixtures\AdminUser::class,
+    ]);
+
+    $role = Role::create(['name' => 'admin', 'guard_name' => 'web']);
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+
+    DB::table('model_has_roles')->insert([
+        'role_id'    => $role->id,
+        'model_id'   => $user->id,
+        'model_type' => User::class,
+    ]);
+
+    $users = $role->users()->get();
+
+    expect($users)->toHaveCount(1)
+        ->and($users->first())->toBeInstanceOf(User::class);
+});
+
+test('Role users() attach writes the model_type of the targeted model', function () {
+    $role = Role::create(['name' => 'admin', 'guard_name' => 'web']);
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+
+    $role->users()->attach($user->id);
+
+    $this->assertDatabaseHas('model_has_roles', [
+        'role_id'    => $role->id,
+        'model_id'   => $user->id,
+        'model_type' => User::class,
+    ]);
+});
+
+test('Permission rename drops the old entry from the group metadata hash', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+    $this->app->singleton(AuthorizationCacheManager::class, fn () => new AuthorizationCacheManager($repo));
+
+    $perm = Permission::create(['name' => 'posts.edit', 'guard_name' => 'web', 'group' => 'content']);
+
+    expect($repo->getPermissionGroups(['web|posts.edit']))->toBe(['web|posts.edit' => 'content']);
+
+    $perm->update(['name' => 'posts.update']);
+
+    expect($repo->getPermissionGroups(['web|posts.edit', 'web|posts.update']))
+        ->toBe(['web|posts.edit' => null, 'web|posts.update' => 'content']);
+});
+
+test('Permission guard change drops the old entry from the group metadata hash', function () {
+    $repo = new InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+    $this->app->singleton(AuthorizationCacheManager::class, fn () => new AuthorizationCacheManager($repo));
+
+    $perm = Permission::create(['name' => 'posts.edit', 'guard_name' => 'web', 'group' => 'content']);
+
+    $perm->update(['guard_name' => 'api']);
+
+    expect($repo->getPermissionGroups(['web|posts.edit', 'api|posts.edit']))
+        ->toBe(['web|posts.edit' => null, 'api|posts.edit' => 'content']);
+});

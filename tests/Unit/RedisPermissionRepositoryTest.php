@@ -217,7 +217,7 @@ test('deleteRoleCache deletes both permissions and users keys', function () {
 test('flushAll scans and deletes all keys with prefix', function () {
     $this->connection->shouldReceive('client')->andReturn(new stdClass());
     $this->connection->shouldReceive('scan')
-        ->with(null, ['match' => 'auth:*', 'count' => 100])
+        ->with(Mockery::mustBe(0), ['match' => 'auth:*', 'count' => 100])
         ->once()
         ->andReturn(['42', ['auth:user:1:permissions', 'auth:user:1:roles']]);
 
@@ -236,7 +236,7 @@ test('flushAll scans and deletes all keys with prefix', function () {
 test('flushAll handles empty scan result', function () {
     $this->connection->shouldReceive('client')->andReturn(new stdClass());
     $this->connection->shouldReceive('scan')
-        ->with(null, ['match' => 'auth:*', 'count' => 100])
+        ->with(Mockery::mustBe(0), ['match' => 'auth:*', 'count' => 100])
         ->once()
         ->andReturn(['0', []]);
 
@@ -250,7 +250,7 @@ test('flushAll stops when scan answers false (phpredis exhausted scan)', functio
     // scan finishes without a final batch of keys.
     $this->connection->shouldReceive('client')->andReturn(new stdClass());
     $this->connection->shouldReceive('scan')
-        ->with(null, ['match' => 'auth:*', 'count' => 100])
+        ->with(Mockery::mustBe(0), ['match' => 'auth:*', 'count' => 100])
         ->once()
         ->andReturn(false);
 
@@ -262,7 +262,7 @@ test('flushAll stops when scan answers false (phpredis exhausted scan)', functio
 test('flushAll handles the integer cursor returned by phpredis', function () {
     $this->connection->shouldReceive('client')->andReturn(new stdClass());
     $this->connection->shouldReceive('scan')
-        ->with(null, ['match' => 'auth:*', 'count' => 100])
+        ->with(Mockery::mustBe(0), ['match' => 'auth:*', 'count' => 100])
         ->once()
         ->andReturn([17, ['auth:user:1:permissions']]);
 
@@ -567,4 +567,36 @@ test('replacePermissionGroups throws TransactionFailedException when EXEC return
 
     expect(fn () => $this->repository->replacePermissionGroups(['web|x' => 'G']))
         ->toThrow(\Scabarcas\LaravelPermissionsRedis\Exceptions\TransactionFailedException::class);
+});
+
+// ─── SCAN initial cursor per client ───
+
+test('flushAll starts from cursor 0 for predis, which rejects a null cursor', function () {
+    // Laravel 11 / 12 hand the cursor to predis untouched, and predis sends
+    // null as an empty string ("ERR invalid cursor"); only Laravel 13 maps it.
+    $this->connection->shouldReceive('client')->andReturn(new stdClass());
+    $this->connection->shouldReceive('scan')
+        ->with(Mockery::mustBe(0), ['match' => 'auth:*', 'count' => 100])
+        ->once()
+        ->andReturn([0, []]);
+
+    $this->repository->flushAll();
+});
+
+test('flushAll starts from a null iterator for phpredis', function () {
+    if (!class_exists('Redis')) {
+        // No phpredis locally: a stand-in exposing what connectionPrefix() reads.
+        eval('class Redis { public const OPT_PREFIX = 2; public function getOption(int $option): mixed { return null; } }');
+    }
+
+    $client = Mockery::mock('Redis');
+    $client->shouldReceive('getOption')->andReturn('');
+    $this->connection->shouldReceive('client')->andReturn($client);
+
+    $this->connection->shouldReceive('scan')
+        ->with(Mockery::mustBe(null), ['match' => 'auth:*', 'count' => 100])
+        ->once()
+        ->andReturn(false);
+
+    $this->repository->flushAll();
 });

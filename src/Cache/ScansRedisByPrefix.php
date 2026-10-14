@@ -22,9 +22,7 @@ trait ScansRedisByPrefix
     {
         $connectionPrefix = $this->connectionPrefix($connection);
 
-        // Start from a null cursor: phpredis treats a 0 / "0" iterator as an
-        // already exhausted scan and returns false without asking the server.
-        $cursor = null;
+        $cursor = $this->initialCursor($connection);
 
         do {
             // Option keys must be lowercase: PhpRedisConnection::scan() only
@@ -46,6 +44,25 @@ trait ScansRedisByPrefix
                 $onBatch($keys);
             }
         } while ((string) $cursor !== '0');
+    }
+
+    /**
+     * The two clients disagree on the cursor that starts a scan. phpredis
+     * treats a 0 / "0" iterator as an already exhausted scan and answers
+     * false without asking the server, so it must start from null. predis
+     * sends the cursor as-is and the server rejects null (serialised as an
+     * empty string) with "ERR invalid cursor"; Laravel 13's PredisConnection
+     * maps null to 0 but Laravel 11 / 12 pass it straight through.
+     */
+    protected function initialCursor(Connection $connection): ?int
+    {
+        $client = $connection->client();
+
+        if (class_exists(Redis::class) && $client instanceof Redis) {
+            return null;
+        }
+
+        return 0;
     }
 
     protected function connectionPrefix(Connection $connection): string

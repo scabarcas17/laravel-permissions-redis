@@ -151,29 +151,40 @@ class PermissionResolver implements PermissionResolverInterface
         );
     }
 
+    /**
+     * Keeps every per-user map (including the warm cooldown timestamps,
+     * which only grow in a long-running worker) at or below the configured
+     * limit, dropping the oldest entries of each one independently.
+     */
     private function evictIfNeeded(): void
     {
         /** @var int $limit */
         $limit = config('permissions-redis.resolver_cache_limit', 1000);
 
-        $size = max(
-            count($this->permissionCache),
-            count($this->roleCache),
-            count($this->allPermissionsCache),
-            count($this->allRolesCache),
-        );
+        $this->permissionCache = $this->trimToLimit($this->permissionCache, $limit);
+        $this->roleCache = $this->trimToLimit($this->roleCache, $limit);
+        $this->allPermissionsCache = $this->trimToLimit($this->allPermissionsCache, $limit);
+        $this->allRolesCache = $this->trimToLimit($this->allRolesCache, $limit);
+        $this->superAdminCache = $this->trimToLimit($this->superAdminCache, $limit);
+        $this->warmAttempts = $this->trimToLimit($this->warmAttempts, $limit);
+    }
 
-        if ($size <= $limit) {
-            return;
+    /**
+     * @template TValue
+     *
+     * @param array<int|string, TValue> $cache
+     *
+     * @return array<int|string, TValue>
+     */
+    private function trimToLimit(array $cache, int $limit): array
+    {
+        $overflow = count($cache) - $limit;
+
+        if ($overflow <= 0) {
+            return $cache;
         }
 
-        $evictCount = $size - $limit;
-
-        $this->permissionCache = array_slice($this->permissionCache, $evictCount, null, true);
-        $this->roleCache = array_slice($this->roleCache, $evictCount, null, true);
-        $this->allPermissionsCache = array_slice($this->allPermissionsCache, $evictCount, null, true);
-        $this->allRolesCache = array_slice($this->allRolesCache, $evictCount, null, true);
-        $this->superAdminCache = array_slice($this->superAdminCache, $evictCount, null, true);
+        return array_slice($cache, $overflow, null, true);
     }
 
     private function ensureUserCacheExists(int|string $userId): void

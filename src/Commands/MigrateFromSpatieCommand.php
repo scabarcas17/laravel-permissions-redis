@@ -248,6 +248,8 @@ class MigrateFromSpatieCommand extends Command
 
             DB::table($target)->insert($inserts);
         });
+
+        $this->syncIdSequence($target);
     }
 
     private function copyRoles(): void
@@ -283,6 +285,28 @@ class MigrateFromSpatieCommand extends Command
 
             DB::table($target)->insert($inserts);
         });
+
+        $this->syncIdSequence($target);
+    }
+
+    /**
+     * The copies keep Spatie's IDs so the pivot rows stay valid, and
+     * PostgreSQL sequences do not advance on inserts with explicit IDs: the
+     * next INSERT would reuse an existing one. Move the sequence past
+     * MAX(id). No-op on other drivers (and when the column has no sequence).
+     */
+    private function syncIdSequence(string $table): void
+    {
+        if (DB::getDriverName() !== 'pgsql') {
+            return;
+        }
+
+        $wrapped = DB::getQueryGrammar()->wrapTable($table);
+
+        DB::statement(
+            "SELECT setval(pg_get_serial_sequence(?, 'id'), COALESCE((SELECT MAX(id) FROM {$wrapped}), 0) + 1, false)",
+            [$table],
+        );
     }
 
     /**
@@ -300,7 +324,16 @@ class MigrateFromSpatieCommand extends Command
             return;
         }
 
-        DB::table($source)->select($columns)->orderBy($columns[0])->chunk(500, function ($rows) use ($target, $columns) {
+        $query = DB::table($source)->select($columns);
+
+        // chunk() paginates with OFFSET, and no single pivot column is
+        // unique, so order by all of them: ties ordered differently between
+        // pages would skip or duplicate rows.
+        foreach ($columns as $column) {
+            $query->orderBy($column);
+        }
+
+        $query->chunk(500, function ($rows) use ($target, $columns) {
             $inserts = [];
 
             foreach ($rows as $row) {

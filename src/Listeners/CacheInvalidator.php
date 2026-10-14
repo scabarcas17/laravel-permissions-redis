@@ -8,6 +8,7 @@ use Illuminate\Events\Dispatcher;
 use Illuminate\Support\Facades\DB;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Concerns\LogsMessages;
+use Scabarcas\LaravelPermissionsRedis\Concerns\ResolvesUserModels;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsAssigned;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
@@ -18,6 +19,7 @@ use Scabarcas\LaravelPermissionsRedis\Events\UserDeleted;
 class CacheInvalidator
 {
     use LogsMessages;
+    use ResolvesUserModels;
 
     public function __construct(
         private readonly AuthorizationCacheManager $cacheManager,
@@ -125,21 +127,5 @@ class CacheInvalidator
             /** @var int $roleId */
             $this->cacheManager->warmRole($roleId);
         }
-    }
-
-    /**
-     * @return array<string>
-     */
-    private function configuredUserModels(): array
-    {
-        $model = config('permissions-redis.user_model', 'App\\Models\\User');
-
-        if (is_array($model)) {
-            /** @var array<string> $model */
-            return array_values($model);
-        }
-
-        /** @var string $model */
-        return [$model];
     }
 }

@@ -5,7 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.1.2] - 2026-10-14
+
+Patch release: a 4.1.1 regression for predis on Laravel 11 / 12, Spatie-style
+model arguments, guard validation on the `Role` model, caches going stale
+after a role rename and inside queue workers, and two fixes to the Spatie
+migration command on PostgreSQL and large pivots. No breaking changes.
+
+### Fixed
+
+- **`flushAll()`, `permissions-redis:flush`, `permissions-redis:stats`, `permissions-redis:warm`, `permissions-redis:seed --fresh` and `migrate-from-spatie` threw `ERR invalid cursor` with predis on Laravel 11 and 12 (regression in 4.1.1).** The phpredis fix in 4.1.1 made the shared SCAN helper start from a `null` cursor, which phpredis requires, and CI passed with both clients because the Redis jobs install Laravel 13, whose `PredisConnection::scan()` maps `null` to `0`. Laravel 11 and 12 have no such method: the call reaches predis as-is, predis serialises `null` as an empty string and the server rejects it, so every full-cache operation failed for predis users on those versions. The helper now starts from `null` only when the connection's client is phpredis and from `0` otherwise, and the Redis 7 integration job runs on Laravel 12 and 13 so the two `PredisConnection` implementations are both exercised.
+- **`Role::syncPermissions()` / `givePermissionTo()` / `revokePermissionTo()` ignored the guard for integer IDs and mangled model instances.** Integer IDs were attached without checking the permission's guard, so a `web` role could be given an `api` permission by ID (the user trait has validated this since `4.0.0-beta.2`). A `Permission` instance was cast to `0` and attached as `permission_id = 0` (a foreign-key error on MySQL / PostgreSQL, a junk row on SQLite). IDs and instances are now validated against the role's guard and silently dropped when they belong to another one, consistent with the trait; any other object throws an `InvalidArgumentException` naming the type.
+- **`Role` / `Permission` instances crashed the user trait.** The Spatie idiom `$user->assignRole($role)` (and `syncRoles`, `removeRole`, `givePermissionTo`, `revokePermissionTo`, `syncPermissions`, the query scopes) hit a catch-all `(int)` cast and threw "could not be converted to int"; `hasRole($role)` cast the model to an array and threw "Array to string conversion"; `hasAnyPermission($permission)` threw on the string cast. Model instances are now accepted wherever the parameter is `mixed`: assignment methods and scopes use the model key (validated against the guard like an integer ID), `hasRole()` uses the role's name and, unless a guard is given, its own `guard_name`. Unsupported objects throw an `InvalidArgumentException` instead of a cast error. `hasPermissionTo()` keeps its `string|BackedEnum` signature.
+- **Renaming a role (or changing its guard) left every cache stale.** The `saved` hook only tried to clear the static id => name memo, and did so by calling the static method on the trait itself, which PHP 8.1+ deprecates and which clears the trait's own copy rather than the user model's (a static property declared in a trait is duplicated into each using class). Nothing rewarmed the `user:{id}:roles` sets either, so after renaming `editor` to `writer`, `hasRole('writer')` stayed false, `hasRole('editor')` stayed true and `getRoleNames()` kept answering `editor` until the TTL expired. The memo now lives on `Role` (`Role::nameById()` / `Role::flushIdNameCache()`, both `@internal`), and an update that changes `name` or `guard_name` rewarms every user holding the role and drops their in-memory entries. The Octane reset made the same ineffective call and is fixed as well; `HasRedisPermissions::flushRoleIdNameCache()` remains as a delegating shim.
+- **Renaming a permission left its old entry in the `permission_groups` hash.** The field for the previous `guard|name` is now removed when `name` or `guard_name` changes; the users and roles holding the permission were already rewarmed.
+- **`Role::users()` returned rows of other models and crashed with a multi-model `user_model`.** The relation did not filter `model_type`, so with two user models sharing an ID space the wrong users came back, and an array `user_model` reached `belongsToMany()` as-is ("Class name must be a valid object or a string"). It now targets the first configured model, filters the pivot by its `model_type`, and `attach()` through it writes that `model_type`.
+- **`WarmCacheOnLogin` crashed on non-Eloquent users and warmed models it does not manage.** The listener called `getKey()` on the `Login` event's user, which `GenericUser` and other custom `Authenticatable` implementations do not have, and it warmed whatever model logged in even when it was not among the configured user models, writing a cache entry under that ID. It now uses `getAuthIdentifier()` and skips users that are not an instance of a configured model.
+- **The resolver's warm-cooldown timestamps were never evicted.** `warmAttempts` was left out of the in-memory eviction, so a long-running worker accumulated one entry per user that ever missed the Redis cache. Every per-user map is now trimmed to `resolver_cache_limit` independently (oldest entries first), the cooldown timestamps included.
+- **Queue workers could serve stale answers indefinitely.** The resolver's in-memory caches live in the container singleton, which a `queue:work` process keeps across jobs, so a permission revoked (and rewarmed in Redis) by another process was still reported as granted by the worker until it restarted. The package now resets its in-memory state on `Illuminate\Queue\Events\JobProcessing`, the same reset Octane gets per request. Redis is untouched; only the per-process memos are dropped.
+- **`permissions-redis:migrate-from-spatie` left the `id` sequences behind on PostgreSQL.** The copy keeps Spatie's IDs so the pivots stay valid, and PostgreSQL sequences do not advance on inserts with explicit IDs, so the first `Permission::create()` / `Role::create()` after migrating failed with a duplicate key. The sequences of the copied tables are now moved past `MAX(id)` (PostgreSQL only; no-op elsewhere).
+- **`permissions-redis:migrate-from-spatie` could skip or duplicate pivot rows past the first 500.** Pivot tables were paginated with `chunk()` ordered by their first column only, which is not unique (every row of a role shares `role_id`), and MySQL / PostgreSQL do not guarantee a stable order among ties between pages. The copies now order by every pivot column.
+
+### Docs
+
+- v4.1.1 was tagged with its notes still under "Unreleased"; the heading and compare link are restored below.
+- README: the `resolver_cache_limit` / `resolver_warm_cooldown` env variables are `PERMISSIONS_REDIS_RESOLVER_CACHE_LIMIT` and `PERMISSIONS_REDIS_RESOLVER_WARM_COOLDOWN`; the table and the cache-miss section named two variables the config never read. The `queue.connection` / `queue.name` options listed since `4.0.0-beta.1` never existed: `--queue[=connection]` is the only knob, `permissions-redis:warm --queue` dispatches one `WarmAllCacheJob` (not a `WarmUserCacheJob` per user), and jobs go to the connection's default queue. `getUserIdsAffectedByPermission()` takes a permission ID and queries the database; it does not read Redis. The key list now includes the `permission_groups` hash, the config table lists the tenancy, Octane and morph-key options, and the invalidation table lists role and permission renames.
+- Migration guide: rows written by Spatie under a morph map carry the alias in `model_type`, while 4.x reads and writes the class name, so they stay invisible until rewritten. The guide now says so and shows the one-off update.
+
+## [4.1.1] - 2026-10-08
+
+Patch release: the two phpredis regressions and the contract suite that
+would have caught them.
 
 ### Fixed
 
@@ -267,6 +297,8 @@ First stable release of `scabarcas/laravel-permissions-redis`.
 - **Test suite.** Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
 - **Documentation.** README with installation guide, usage examples, conventions, API reference, and C4 architecture diagrams.
 
+[4.1.2]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.1.1...v4.1.2
+[4.1.1]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.1.0...v4.1.1
 [4.1.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.1...v4.1.0
 [4.0.1]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.0...v4.0.1
 [4.0.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.0-beta.2...v4.0.0

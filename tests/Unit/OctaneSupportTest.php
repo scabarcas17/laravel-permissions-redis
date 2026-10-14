@@ -161,10 +161,7 @@ test('Octane RequestReceived listener flushes resolver, repository state, and ro
         eval('namespace Laravel\\Octane\\Events; class RequestReceived {}');
     }
 
-    \Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions::class; // autoload
-    $reflection = new ReflectionClass(\Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions::class);
-    $cacheProp = $reflection->getProperty('roleIdNameCache');
-    $cacheProp->setAccessible(true);
+    $cacheProp = new ReflectionProperty(\Scabarcas\LaravelPermissionsRedis\Models\Role::class, 'idNameCache');
     $cacheProp->setValue(null, [42 => 'admin']);
 
     (new \Scabarcas\LaravelPermissionsRedis\PermissionsRedisServiceProvider($this->app))->boot();
@@ -172,4 +169,32 @@ test('Octane RequestReceived listener flushes resolver, repository state, and ro
     event(new $requestReceivedClass());
 
     expect($cacheProp->getValue())->toBe([]);
+});
+
+// ─── Queue workers ───
+
+test('JobProcessing resets the in-memory state so a worker does not serve stale answers', function () {
+    $repo = new \Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+    $this->app->forgetInstance(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class);
+
+    $resolver = $this->app->make(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class);
+
+    $repo->setUserPermissions(1, ['web|posts.edit']);
+    expect($resolver->hasPermission(1, 'posts.edit', 'web'))->toBeTrue();
+
+    // Another process revokes the permission and rewarms Redis.
+    $repo->setUserPermissions(1, []);
+
+    $cacheProp = new ReflectionProperty(\Scabarcas\LaravelPermissionsRedis\Models\Role::class, 'idNameCache');
+    $cacheProp->setValue(null, [42 => 'admin']);
+
+    // The framework's own JobProcessing listeners read the job payload.
+    $job = Mockery::mock(\Illuminate\Contracts\Queue\Job::class)->shouldIgnoreMissing();
+    $job->shouldReceive('payload')->andReturn([]);
+
+    event(new \Illuminate\Queue\Events\JobProcessing('redis', $job));
+
+    expect($resolver->hasPermission(1, 'posts.edit', 'web'))->toBeFalse()
+        ->and($cacheProp->getValue())->toBe([]);
 });

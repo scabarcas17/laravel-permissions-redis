@@ -54,6 +54,21 @@ class Permission extends Model
         });
 
         static::updated(function (Permission $permission): void {
+            // A rename (or guard change) leaves the old "guard|name" field
+            // behind in the groups hash; drop it before the saved hook
+            // writes the new one. getOriginal() still holds the pre-save
+            // values here because syncOriginal() runs after `saved`.
+            if ($permission->wasChanged('name') || $permission->wasChanged('guard_name')) {
+                $oldGuard = $permission->getOriginal('guard_name');
+                $oldName = $permission->getOriginal('name');
+
+                if (is_string($oldGuard) && is_string($oldName)) {
+                    /** @var PermissionRepositoryInterface $repository */
+                    $repository = app(PermissionRepositoryInterface::class);
+                    $repository->deletePermissionGroup("{$oldGuard}|{$oldName}");
+                }
+            }
+
             /** @var AuthorizationCacheManager $cacheManager */
             $cacheManager = app(AuthorizationCacheManager::class);
             $cacheManager->warmPermissionAffectedUsers($permission->id);

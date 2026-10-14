@@ -179,3 +179,50 @@ test('Role hasPermission throttles rewarms for genuinely missing permissions', f
     expect($role->hasPermission('users.delete'))->toBeFalse()
         ->and($role->hasPermission('users.delete'))->toBeFalse();
 });
+
+test('Role syncPermissions drops integer IDs that belong to another guard', function () {
+    Event::fake([PermissionsSynced::class]);
+
+    $role = Role::create(['name' => 'editor', 'guard_name' => 'web']);
+    $apiPerm = Permission::findOrCreate('secret.export', 'api');
+    $webPerm = Permission::findOrCreate('posts.edit', 'web');
+
+    $role->syncPermissions([$apiPerm->id, $webPerm->id]);
+
+    expect($role->permissions()->pluck('id')->all())->toBe([$webPerm->id]);
+});
+
+test('Role syncPermissions accepts Permission model instances', function () {
+    Event::fake([PermissionsSynced::class]);
+
+    $role = Role::create(['name' => 'editor', 'guard_name' => 'web']);
+    $create = Permission::findOrCreate('posts.create');
+    $edit = Permission::findOrCreate('posts.edit');
+
+    $role->syncPermissions($create, $edit);
+
+    expect($role->permissions()->pluck('name')->sort()->values()->all())
+        ->toBe(['posts.create', 'posts.edit']);
+
+    $role->revokePermissionTo($edit);
+
+    expect($role->permissions()->pluck('name')->all())->toBe(['posts.create']);
+});
+
+test('Role syncPermissions drops a Permission instance from another guard', function () {
+    Event::fake([PermissionsSynced::class]);
+
+    $role = Role::create(['name' => 'editor', 'guard_name' => 'web']);
+    $apiPerm = Permission::findOrCreate('secret.export', 'api');
+
+    $role->syncPermissions($apiPerm);
+
+    expect(DB::table('role_has_permissions')->where('role_id', $role->id)->count())->toBe(0);
+});
+
+test('Role givePermissionTo rejects unsupported objects', function () {
+    $role = Role::create(['name' => 'editor', 'guard_name' => 'web']);
+
+    expect(fn () => $role->givePermissionTo(new stdClass()))
+        ->toThrow(InvalidArgumentException::class, 'stdClass');
+});
