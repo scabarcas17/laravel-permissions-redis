@@ -212,3 +212,73 @@ test('migrate command copies data when tables differ', function () {
     $this->assertDatabaseHas('permissions', ['name' => 'users.create']);
     $this->assertDatabaseHas('roles', ['name' => 'admin']);
 });
+
+test('migrate command copies pivot tables larger than one chunk with a deterministic order', function () {
+    Schema::create('sp_permissions', function ($table) {
+        $table->id();
+        $table->string('name');
+        $table->string('guard_name');
+        $table->timestamps();
+    });
+    Schema::create('sp_roles', function ($table) {
+        $table->id();
+        $table->string('name');
+        $table->string('guard_name');
+        $table->timestamps();
+    });
+    Schema::create('sp_model_has_permissions', function ($table) {
+        $table->unsignedBigInteger('permission_id');
+        $table->string('model_type');
+        $table->unsignedBigInteger('model_id');
+    });
+    Schema::create('sp_model_has_roles', function ($table) {
+        $table->unsignedBigInteger('role_id');
+        $table->string('model_type');
+        $table->unsignedBigInteger('model_id');
+    });
+    Schema::create('sp_role_has_permissions', function ($table) {
+        $table->unsignedBigInteger('permission_id');
+        $table->unsignedBigInteger('role_id');
+    });
+
+    config()->set('permission.table_names', [
+        'permissions'           => 'sp_permissions',
+        'roles'                 => 'sp_roles',
+        'model_has_permissions' => 'sp_model_has_permissions',
+        'model_has_roles'       => 'sp_model_has_roles',
+        'role_has_permissions'  => 'sp_role_has_permissions',
+    ]);
+
+    // Every row shares role_id, so ordering by the first pivot column alone
+    // leaves ties spread across the 500-row chunk pages.
+    $rows = [];
+
+    for ($i = 1; $i <= 1200; $i++) {
+        $rows[] = ['role_id' => 1, 'model_type' => User::class, 'model_id' => $i];
+    }
+
+    foreach (array_chunk($rows, 300) as $chunk) {
+        DB::table('sp_model_has_roles')->insert($chunk);
+    }
+
+    $queries = [];
+    DB::listen(function ($query) use (&$queries): void {
+        $queries[] = $query->sql;
+    });
+
+    $this->artisan('permissions-redis:migrate-from-spatie --no-warm')->assertSuccessful();
+
+    expect(DB::table('model_has_roles')->count())->toBe(1200)
+        ->and(DB::table('model_has_roles')->distinct()->count('model_id'))->toBe(1200);
+
+    $pivotSelects = array_values(array_filter(
+        $queries,
+        fn (string $sql): bool => str_contains($sql, 'from "sp_model_has_roles"') && str_contains($sql, 'order by'),
+    ));
+
+    expect($pivotSelects)->not->toBeEmpty()
+        ->and($pivotSelects[0])->toContain('order by "role_id" asc, "model_type" asc, "model_id" asc');
+
+    // The sequence resync is PostgreSQL-only; nothing of the sort runs on SQLite.
+    expect(array_filter($queries, fn (string $sql): bool => str_contains($sql, 'setval')))->toBeEmpty();
+});
