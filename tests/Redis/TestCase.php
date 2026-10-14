@@ -86,9 +86,12 @@ abstract class TestCase extends OrchestraTestCase
         $clientPrefix = $this->clientPrefix();
 
         // The connection-level scan() is the client-agnostic entry point (the
-        // raw SCAN signatures of predis and phpredis differ). The cursor must
-        // start as null: phpredis treats 0 / "0" as an already finished scan.
-        $cursor = null;
+        // raw SCAN signatures of predis and phpredis differ). phpredis must
+        // start from a null iterator (0 / "0" means "already finished"), while
+        // predis needs 0: it sends null as an empty string, which Redis
+        // rejects with "ERR invalid cursor" on Laravel 11 / 12 (Laravel 13's
+        // PredisConnection::scan() maps null to 0 itself).
+        $cursor = $this->redisClient() === 'phpredis' ? null : 0;
 
         do {
             /** @var array{0: int|string, 1: array<string>}|false $result */
