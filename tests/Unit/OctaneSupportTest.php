@@ -161,10 +161,7 @@ test('Octane RequestReceived listener flushes resolver, repository state, and ro
         eval('namespace Laravel\\Octane\\Events; class RequestReceived {}');
     }
 
-    \Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions::class; // autoload
-    $reflection = new ReflectionClass(\Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions::class);
-    $cacheProp = $reflection->getProperty('roleIdNameCache');
-    $cacheProp->setAccessible(true);
+    $cacheProp = new ReflectionProperty(\Scabarcas\LaravelPermissionsRedis\Models\Role::class, 'idNameCache');
     $cacheProp->setValue(null, [42 => 'admin']);
 
     (new \Scabarcas\LaravelPermissionsRedis\PermissionsRedisServiceProvider($this->app))->boot();

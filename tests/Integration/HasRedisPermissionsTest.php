@@ -773,16 +773,123 @@ test('scopePermission with integer ID filters by guard', function () {
         ->and(User::query()->permission($apiPerm->id, 'api')->get()->pluck('id')->all())->toBe([$user2->id]);
 });
 
-test('roleIdNameCache is flushed when a role is renamed', function () {
-    // Pre-warm the static cache by looking up the role by ID.
-    $this->user->hasRole($this->adminRole->id);
+test('renaming a role rewarms its users and refreshes id lookups', function () {
+    // Prime both memos: the id => name map and the resolver's in-memory role cache.
+    expect($this->user->hasRole($this->adminRole->id))->toBeTrue()
+        ->and($this->user->hasRole('admin'))->toBeTrue();
 
-    // Rename the role in the DB through Eloquent (triggers the saved hook).
     $this->adminRole->update(['name' => 'renamed-admin']);
 
-    // Seed the repo so the user has the NEW name.
-    $this->repo->setUserRoles($this->user->id, ['web|renamed-admin']);
+    expect($this->repo->getUserRoles($this->user->id))->toBe(['web|renamed-admin'])
+        ->and($this->user->hasRole('renamed-admin'))->toBeTrue()
+        ->and($this->user->hasRole('admin'))->toBeFalse()
+        ->and($this->user->hasRole($this->adminRole->id))->toBeTrue()
+        ->and($this->user->getRoleNames()->all())->toBe(['renamed-admin']);
+});
 
-    // Second lookup by ID should see the renamed role, not a stale 'admin'.
-    expect($this->user->hasRole($this->adminRole->id))->toBeTrue();
+test('changing a role guard rewarms its users under the new guard', function () {
+    expect($this->user->hasRole('admin'))->toBeTrue();
+
+    $this->adminRole->update(['guard_name' => 'api']);
+
+    expect($this->user->hasRole('admin'))->toBeFalse()
+        ->and($this->user->forGuard('api')->hasRole('admin'))->toBeTrue();
+});
+
+// ─── Model instances (Spatie-style arguments) ───
+
+test('assignRole accepts a Role model instance', function () {
+    Event::fake([RolesAssigned::class]);
+
+    $this->user->assignRole($this->editorRole);
+
+    $this->assertDatabaseHas('model_has_roles', [
+        'role_id'    => $this->editorRole->id,
+        'model_id'   => $this->user->id,
+        'model_type' => User::class,
+    ]);
+});
+
+test('syncRoles and removeRole accept Role model instances', function () {
+    Event::fake([RolesAssigned::class]);
+
+    $this->user->syncRoles([$this->editorRole]);
+
+    expect($this->user->roles()->pluck('id')->all())->toBe([$this->editorRole->id]);
+
+    $this->user->removeRole($this->editorRole);
+
+    expect($this->user->roles()->count())->toBe(0);
+});
+
+test('assignRole drops a Role instance that belongs to another guard', function () {
+    Event::fake([RolesAssigned::class]);
+
+    $apiRole = Role::create(['name' => 'api-admin', 'guard_name' => 'api']);
+
+    $this->user->assignRole($apiRole);
+
+    $this->assertDatabaseMissing('model_has_roles', [
+        'role_id'  => $apiRole->id,
+        'model_id' => $this->user->id,
+    ]);
+});
+
+test('givePermissionTo and syncPermissions accept Permission model instances', function () {
+    $this->user->givePermissionTo($this->deletePerm);
+
+    $this->assertDatabaseHas('model_has_permissions', [
+        'permission_id' => $this->deletePerm->id,
+        'model_id'      => $this->user->id,
+        'model_type'    => User::class,
+    ]);
+
+    $this->user->syncPermissions([$this->createPerm, $this->editPerm]);
+
+    expect($this->user->permissions()->pluck('id')->sort()->values()->all())
+        ->toBe([$this->createPerm->id, $this->editPerm->id]);
+});
+
+test('hasRole accepts a Role model instance', function () {
+    expect($this->user->hasRole($this->adminRole))->toBeTrue()
+        ->and($this->user->hasRole($this->editorRole))->toBeFalse()
+        ->and($this->user->hasAnyRole($this->editorRole, $this->adminRole))->toBeTrue()
+        ->and($this->user->hasAllRoles($this->editorRole, $this->adminRole))->toBeFalse();
+});
+
+test('hasRole with a Role instance checks under the role guard unless one is given', function () {
+    $apiAdmin = Role::create(['name' => 'admin', 'guard_name' => 'api']);
+    $this->repo->setUserRoles($this->user->id, ['api|admin']);
+    app(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class)->flushUser($this->user->id);
+
+    expect($this->user->hasRole($apiAdmin))->toBeTrue()
+        ->and($this->user->hasRole($apiAdmin, 'web'))->toBeFalse();
+});
+
+test('hasAnyPermission and hasAllPermissions accept Permission model instances', function () {
+    $other = Permission::create(['name' => 'reports.view', 'guard_name' => 'web']);
+
+    expect($this->user->hasAnyPermission($other, $this->editPerm))->toBeTrue()
+        ->and($this->user->hasAllPermissions($this->createPerm, $this->editPerm))->toBeTrue()
+        ->and($this->user->hasAllPermissions($this->createPerm, $other))->toBeFalse();
+});
+
+test('scopeRole and scopePermission accept model instances', function () {
+    expect(User::query()->role($this->adminRole)->pluck('id')->all())->toBe([$this->user->id])
+        ->and(User::query()->permission($this->createPerm)->pluck('id')->all())->toBe([$this->user->id]);
+});
+
+test('assignRole rejects unsupported objects with a clear exception', function () {
+    expect(fn () => $this->user->assignRole(new stdClass()))
+        ->toThrow(InvalidArgumentException::class, 'stdClass');
+});
+
+test('hasRole rejects unsupported objects with a clear exception', function () {
+    expect(fn () => $this->user->hasRole(new stdClass()))
+        ->toThrow(InvalidArgumentException::class, 'stdClass');
+});
+
+test('hasAnyPermission rejects unsupported objects with a clear exception', function () {
+    expect(fn () => $this->user->hasAnyPermission(new stdClass()))
+        ->toThrow(InvalidArgumentException::class, 'stdClass');
 });

@@ -8,6 +8,7 @@ use BackedEnum;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Collection;
+use InvalidArgumentException;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsAssigned;
 use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
@@ -22,9 +23,6 @@ use Scabarcas\LaravelPermissionsRedis\Models\Role;
 trait HasRedisPermissions
 {
     private ?string $guardOverride = null;
-
-    /** @var array<int, string|null> */
-    private static array $roleIdNameCache = [];
 
     public function forGuard(string $guard): static
     {
@@ -72,29 +70,39 @@ trait HasRedisPermissions
     }
 
     /**
-     * @param string|int|array<string|int>|BackedEnum|Collection $roles
+     * @param string|int|array<string|int|Role>|BackedEnum|Role|Collection $roles
      */
     public function hasRole(mixed $roles, ?string $guardName = null): bool
     {
         $override = $this->consumeGuardOverride();
         $guardName ??= $override;
 
+        // Anything that is not a list is a single identifier, so unsupported
+        // objects reach the type check below instead of being cast to an array.
         $items = match (true) {
-            is_string($roles), is_int($roles), $roles instanceof BackedEnum => [$roles],
-            $roles instanceof Collection                                    => $roles->all(),
-            default                                                         => (array) $roles,
+            $roles instanceof Collection => $roles->all(),
+            is_array($roles)             => $roles,
+            default                      => [$roles],
         };
 
         $resolver = $this->getPermissionResolver();
 
         foreach ($items as $role) {
             $name = match (true) {
+                $role instanceof Role       => $role->name,
                 $role instanceof BackedEnum => (string) $role->value,
                 is_int($role)               => $this->resolveRoleNameById($role),
-                default                     => (string) $role,
+                is_object($role)            => throw new InvalidArgumentException(sprintf(
+                    'Unsupported role identifier of type %s: pass a name, an ID, a BackedEnum or a Role instance.',
+                    $role::class,
+                )),
+                default => (string) $role,
             };
 
-            if ($name !== null && $resolver->hasRole($this->id, $name, $guardName)) {
+            // A Role instance carries its own guard; an explicit guard still wins.
+            $itemGuard = $guardName ?? ($role instanceof Role ? $role->guard_name : null);
+
+            if ($name !== null && $resolver->hasRole($this->id, $name, $itemGuard)) {
                 return true;
             }
         }
@@ -199,7 +207,7 @@ trait HasRedisPermissions
     }
 
     /**
-     * @param string|int|array<string|int>|BackedEnum ...$roles
+     * @param string|int|array<string|int|Role>|BackedEnum|Role ...$roles
      */
     public function assignRole(mixed ...$roles): static
     {
@@ -214,7 +222,7 @@ trait HasRedisPermissions
     }
 
     /**
-     * @param string|int|array<string|int>|BackedEnum ...$roles
+     * @param string|int|array<string|int|Role>|BackedEnum|Role ...$roles
      */
     public function syncRoles(mixed ...$roles): static
     {
@@ -243,7 +251,7 @@ trait HasRedisPermissions
     }
 
     /**
-     * @param string|int|array<string|int>|BackedEnum ...$permissions
+     * @param string|int|array<string|int|Permission>|BackedEnum|Permission ...$permissions
      */
     public function givePermissionTo(mixed ...$permissions): static
     {
@@ -258,7 +266,7 @@ trait HasRedisPermissions
     }
 
     /**
-     * @param string|int|array<string|int>|BackedEnum ...$permissions
+     * @param string|int|array<string|int|Permission>|BackedEnum|Permission ...$permissions
      */
     public function revokePermissionTo(mixed ...$permissions): static
     {
@@ -273,7 +281,7 @@ trait HasRedisPermissions
     }
 
     /**
-     * @param string|int|array<string|int>|BackedEnum ...$permissions
+     * @param string|int|array<string|int|Permission>|BackedEnum|Permission ...$permissions
      */
     public function syncPermissions(mixed ...$permissions): static
     {
@@ -370,20 +378,17 @@ trait HasRedisPermissions
     }
 
     /**
-     * @internal Used by Octane reset and testing utilities.
+     * @internal Kept for backwards compatibility; the id => name memo now
+     *           lives on Role (see Role::flushIdNameCache()).
      */
     public static function flushRoleIdNameCache(): void
     {
-        self::$roleIdNameCache = [];
+        Role::flushIdNameCache();
     }
 
     private function resolveRoleNameById(int $roleId): ?string
     {
-        if (!array_key_exists($roleId, self::$roleIdNameCache)) {
-            self::$roleIdNameCache[$roleId] = Role::query()->where('id', $roleId)->value('name');
-        }
-
-        return self::$roleIdNameCache[$roleId];
+        return Role::nameById($roleId);
     }
 
     private function consumeGuardOverride(): ?string
@@ -431,9 +436,9 @@ trait HasRedisPermissions
     }
 
     /**
-     * Resolve a mixed list of role identifiers to IDs. Integer IDs are
-     * validated against the target guard and silently dropped if they do
-     * not belong to it, which keeps guard isolation honest.
+     * Resolve a mixed list of role identifiers to IDs. Integer IDs and Role
+     * instances are validated against the target guard and silently dropped
+     * if they do not belong to it, which keeps guard isolation honest.
      *
      * @param array<mixed> $roles
      *
@@ -447,10 +452,17 @@ trait HasRedisPermissions
         foreach ($roles as $role) {
             if (is_int($role)) {
                 $rawIds[] = $role;
+            } elseif ($role instanceof Role) {
+                $rawIds[] = $role->id;
             } elseif ($role instanceof BackedEnum) {
                 $names[] = (string) $role->value;
             } elseif (is_string($role)) {
                 $names[] = $role;
+            } elseif (is_object($role)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Unsupported role identifier of type %s: pass a name, an ID, a BackedEnum or a Role instance.',
+                    $role::class,
+                ));
             } else {
                 $rawIds[] = (int) $role;
             }
@@ -494,10 +506,17 @@ trait HasRedisPermissions
         foreach ($permissions as $permission) {
             if (is_int($permission)) {
                 $rawIds[] = $permission;
+            } elseif ($permission instanceof Permission) {
+                $rawIds[] = $permission->id;
             } elseif ($permission instanceof BackedEnum) {
                 $names[] = (string) $permission->value;
             } elseif (is_string($permission)) {
                 $names[] = $permission;
+            } elseif (is_object($permission)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Unsupported permission identifier of type %s: pass a name, an ID, a BackedEnum or a Permission instance.',
+                    $permission::class,
+                ));
             } else {
                 $rawIds[] = (int) $permission;
             }
@@ -538,8 +557,19 @@ trait HasRedisPermissions
         return collect($permissions)
             ->flatten()
             ->map(function (mixed $permission): string {
+                if ($permission instanceof Permission) {
+                    return $permission->name;
+                }
+
                 if ($permission instanceof BackedEnum) {
                     return (string) $permission->value;
+                }
+
+                if (is_object($permission)) {
+                    throw new InvalidArgumentException(sprintf(
+                        'Unsupported permission identifier of type %s: pass a name, a BackedEnum or a Permission instance.',
+                        $permission::class,
+                    ));
                 }
 
                 return (string) $permission;

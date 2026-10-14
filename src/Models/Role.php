@@ -9,10 +9,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use InvalidArgumentException;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Concerns\ResolvesUserModels;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsSynced;
 use Scabarcas\LaravelPermissionsRedis\Events\RoleDeleted;
-use Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions;
 
 /**
  * @property int         $id
@@ -22,11 +23,23 @@ use Scabarcas\LaravelPermissionsRedis\Traits\HasRedisPermissions;
  */
 class Role extends Model
 {
+    use ResolvesUserModels;
+
     /** @var list<string> */
     protected $fillable = ['name', 'description', 'guard_name'];
 
     /** @var array<int, float> */
     private static array $rewarmAttempts = [];
+
+    /**
+     * Process-wide id => name memo behind HasRedisPermissions::hasRole() for
+     * integer IDs. It lives on this class rather than on the trait because a
+     * static property declared in a trait is copied into every class using
+     * it, so a flush issued from the outside could never reach them all.
+     *
+     * @var array<int, string|null>
+     */
+    private static array $idNameCache = [];
 
     public static function findOrCreate(string $name, string $guardName = 'web'): static
     {
@@ -40,6 +53,31 @@ class Role extends Model
         );
 
         return $role;
+    }
+
+    /**
+     * Role name for an ID, memoised for the lifetime of the process.
+     *
+     * @internal Used by HasRedisPermissions::hasRole(); flushed on rename,
+     *           delete and at Octane / queue worker boundaries.
+     */
+    public static function nameById(int $roleId): ?string
+    {
+        if (!array_key_exists($roleId, self::$idNameCache)) {
+            $name = static::query()->where('id', $roleId)->value('name');
+
+            self::$idNameCache[$roleId] = is_string($name) ? $name : null;
+        }
+
+        return self::$idNameCache[$roleId];
+    }
+
+    /**
+     * @internal Used by Octane / queue resets and testing utilities.
+     */
+    public static function flushIdNameCache(): void
+    {
+        self::$idNameCache = [];
     }
 
     public function getTable(): string
@@ -64,11 +102,16 @@ class Role extends Model
         );
     }
 
-    /** @return BelongsToMany<Model, $this> */
+    /**
+     * Users holding this role. With several configured user models the
+     * relation targets the first one; the model_type filter keeps rows of
+     * the other models (which may share IDs) out of the result.
+     *
+     * @return BelongsToMany<Model, $this>
+     */
     public function users(): BelongsToMany
     {
-        /** @var class-string<Model> $userModel */
-        $userModel = config('permissions-redis.user_model', 'App\\Models\\User');
+        $userModel = $this->primaryUserModel();
 
         /** @var string $table */
         $table = config('permissions-redis.tables.model_has_roles', 'model_has_roles');
@@ -78,10 +121,12 @@ class Role extends Model
             table: $table,
             foreignPivotKey: 'role_id',
             relatedPivotKey: 'model_id',
-        );
+        )
+            ->wherePivot('model_type', $userModel)
+            ->withPivotValue('model_type', $userModel);
     }
 
-    /** @param string|int|array<string|int>|BackedEnum ...$permissions */
+    /** @param string|int|array<string|int|Permission>|BackedEnum|Permission ...$permissions */
     public function syncPermissions(mixed ...$permissions): static
     {
         $permissions = is_array($permissions[0] ?? null) ? $permissions[0] : $permissions;
@@ -93,7 +138,7 @@ class Role extends Model
         return $this;
     }
 
-    /** @param string|int|BackedEnum ...$permissions */
+    /** @param string|int|BackedEnum|Permission ...$permissions */
     public function givePermissionTo(mixed ...$permissions): static
     {
         $this->permissions()->syncWithoutDetaching($this->resolvePermissionIds(collect($permissions)->flatten()->all()));
@@ -103,7 +148,7 @@ class Role extends Model
         return $this;
     }
 
-    /** @param string|int|BackedEnum ...$permissions */
+    /** @param string|int|BackedEnum|Permission ...$permissions */
     public function revokePermissionTo(mixed ...$permissions): static
     {
         $this->permissions()->detach($this->resolvePermissionIds(collect($permissions)->flatten()->all()));
@@ -159,9 +204,26 @@ class Role extends Model
 
     protected static function booted(): void
     {
-        static::saved(function (Role $role): void {
-            if ($role->wasChanged('name')) {
-                HasRedisPermissions::flushRoleIdNameCache();
+        // A rename (or guard change) alters the "guard|name" entry cached in
+        // Redis for every user holding the role, so those users are rewarmed
+        // and the id => name memo dropped. Hooked on `updated` because
+        // wasChanged() is empty on inserts.
+        static::updated(function (Role $role): void {
+            if (!$role->wasChanged('name') && !$role->wasChanged('guard_name')) {
+                return;
+            }
+
+            self::flushIdNameCache();
+
+            /** @var AuthorizationCacheManager $cacheManager */
+            $cacheManager = app(AuthorizationCacheManager::class);
+
+            /** @var PermissionResolverInterface $resolver */
+            $resolver = app(PermissionResolverInterface::class);
+
+            foreach ($cacheManager->getRoleUserIdsFromDb($role->id) as $userId) {
+                $cacheManager->warmUser($userId);
+                $resolver->flushUser($userId);
             }
         });
 
@@ -175,7 +237,7 @@ class Role extends Model
         });
 
         static::deleted(function (Role $role): void {
-            HasRedisPermissions::flushRoleIdNameCache();
+            self::flushIdNameCache();
 
             /** @var array<int|string> $affectedUserIds */
             $affectedUserIds = $role->getAttribute('_affected_user_ids') ?? [];
@@ -193,23 +255,45 @@ class Role extends Model
     }
 
     /**
+     * Resolve names, IDs, enums and Permission instances to IDs. Integer IDs
+     * (and instances) are validated against this role's guard and silently
+     * dropped when they belong to another one, as the user trait does.
+     *
      * @param array<mixed> $permissions
      *
      * @return array<int>
      */
     private function resolvePermissionIds(array $permissions): array
     {
-        $intIds = [];
+        $rawIds = [];
         $names = [];
 
         foreach ($permissions as $permission) {
-            if ($permission instanceof BackedEnum) {
+            if ($permission instanceof Permission) {
+                $rawIds[] = $permission->id;
+            } elseif ($permission instanceof BackedEnum) {
                 $names[] = (string) $permission->value;
             } elseif (is_string($permission)) {
                 $names[] = $permission;
+            } elseif (is_object($permission)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Unsupported permission identifier of type %s: pass a name, an ID, a BackedEnum or a Permission instance.',
+                    $permission::class,
+                ));
             } else {
-                $intIds[] = is_numeric($permission) ? (int) $permission : 0;
+                $rawIds[] = is_numeric($permission) ? (int) $permission : 0;
             }
+        }
+
+        $validated = [];
+
+        if ($rawIds !== []) {
+            $validated = Permission::query()
+                ->where('guard_name', $this->guard_name)
+                ->whereIn('id', $rawIds)
+                ->pluck('id')
+                ->map(fn (mixed $id): int => is_numeric($id) ? (int) $id : 0)
+                ->all();
         }
 
         if ($names !== []) {
@@ -220,9 +304,9 @@ class Role extends Model
                 ->map(fn (mixed $id): int => is_numeric($id) ? (int) $id : 0)
                 ->all();
 
-            $intIds = array_merge($intIds, $resolved);
+            $validated = array_merge($validated, $resolved);
         }
 
-        return $intIds;
+        return $validated;
     }
 }
