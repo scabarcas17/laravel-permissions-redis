@@ -89,7 +89,7 @@ The `redis` extension (phpredis) is recommended in production (`pecl install red
 | `pestphp/pest` | `^4.4` | Testing framework |
 | `phpstan/phpstan` | `^2.1` | Static analysis |
 | `larastan/larastan` | `^3` | Laravel-specific static analysis rules |
-| `laravel/pint` | `^1.29` | Code style formatting (PSR-12) |
+| `laravel/pint` | `1.32.1` (exact pin, bumped by Dependabot) | Code style formatting (PSR-12) |
 | `orchestra/testbench` | `^10.11 \| ^11.0` | Laravel package testing harness |
 
 ### Infrastructure
@@ -216,7 +216,10 @@ auth:user:{userId}:permissions   -> SET of permission names
 auth:user:{userId}:roles         -> SET of role names
 auth:role:{roleId}:permissions   -> SET of permission names
 auth:role:{roleId}:users         -> SET of user IDs
+auth:permission_groups           -> HASH of "guard|name" => group (global, not tenant-scoped)
 ```
+
+Permission and role names are stored as `guard|name` entries (for example `web|posts.edit`), which is why names cannot contain the `|` character.
 
 ---
 
@@ -300,10 +303,11 @@ All options live in `config/permissions-redis.php`:
 | `super_admin_role` | `PERMISSIONS_REDIS_SUPER_ADMIN_ROLE` | `null` | Role that bypasses all checks |
 | `wildcard_permissions` | `PERMISSIONS_REDIS_WILDCARD` | `false` | Enable `fnmatch()` wildcard patterns |
 | `register_blade_directives` | *(none)* | `true` | Register Blade directives |
-| `resolver_cache_limit` | `PERMISSIONS_REDIS_RESOLVER_LIMIT` | `1000` | Max users held in the in-memory resolver cache before LRU eviction |
-| `resolver_warm_cooldown` | `PERMISSIONS_REDIS_WARM_COOLDOWN` | `1.0` | Seconds before a failed cache-miss warm is retried for the same user |
-| `queue.connection` | `PERMISSIONS_REDIS_QUEUE_CONNECTION` | `null` | Queue connection used by `WarmUserCacheJob` (`null` = default) |
-| `queue.name` | `PERMISSIONS_REDIS_QUEUE_NAME` | `'default'` | Queue name for warming jobs |
+| `resolver_cache_limit` | `PERMISSIONS_REDIS_RESOLVER_CACHE_LIMIT` | `1000` | Max users held in each in-memory resolver cache before the oldest entries are evicted |
+| `resolver_warm_cooldown` | `PERMISSIONS_REDIS_RESOLVER_WARM_COOLDOWN` | `1.0` | Seconds before a failed cache-miss warm is retried for the same user |
+| `tenancy.enabled` / `tenancy.resolver` | `PERMISSIONS_REDIS_TENANCY_ENABLED` / `PERMISSIONS_REDIS_TENANCY_RESOLVER` | `false` / `null` | Per-tenant key isolation, see [Multi-Tenancy](#multi-tenancy) |
+| `octane.reset_on_request` | `PERMISSIONS_REDIS_OCTANE_RESET` | `false` | Reset in-memory state per Octane request, see [Laravel Octane](#laravel-octane) |
+| `model_morph_key_type` | `PERMISSIONS_REDIS_MORPH_KEY_TYPE` | `'int'` | `model_id` column type: `int`, `uuid` or `ulid` |
 | `seed` | *(none)* | *(see config)* | Roles and permissions to seed via CLI |
 | `tables` | *(none)* | *(see config)* | Custom table names |
 
@@ -402,7 +406,7 @@ $user->revokePermissionTo('reports.export');
 $user->syncPermissions(['reports.view']);
 ```
 
-All assignment methods accept: `string`, `int` (ID), `BackedEnum`, `array`, or `Collection`.
+All assignment methods accept: `string`, `int` (ID), `BackedEnum`, `Role` / `Permission` model instances, `array`, or `Collection`. Integer IDs and model instances are validated against the guard and silently dropped when they belong to another one; any other object type throws an `InvalidArgumentException`.
 
 ### Checking Roles and Permissions
 
@@ -440,7 +444,7 @@ $user->getRoleNames();          // Collection<string>
 
 #### Query Scopes
 
-> **Scopes run SQL, not Redis.** `scopeRole` and `scopePermission` issue database queries against the pivot tables and do **not** consult the Redis cache. Use them for reporting, admin dashboards, or any context where you need the full user list, not in hot authorization paths (`hasPermissionTo`, middleware, Blade). For a throughput-sensitive "which users have role X" lookup, call `$cacheManager->getUserIdsAffectedByPermission($name)` or the equivalent role-cache method, both of which read from Redis.
+> **Scopes run SQL, not Redis.** `scopeRole` and `scopePermission` issue database queries against the pivot tables and do **not** consult the Redis cache. Use them for reporting, admin dashboards, or any context where you need the full user list, not in hot authorization paths (`hasPermissionTo`, middleware, Blade). The only Redis-backed "which users have role X" lookup is the role index, `app(PermissionRepositoryInterface::class)->getRoleUserIds($roleId)`; `$cacheManager->getUserIdsAffectedByPermission($permissionId)` also exists but takes a permission ID and queries the database.
 
 ```php
 // Find users with a specific role (SQL query)
@@ -648,14 +652,21 @@ The package also registers a section in `php artisan about` with the installed v
 Both warm commands accept `--queue` to push the operation onto the queue instead of running it synchronously. This is the recommended approach for large user tables or post-deploy rewarms:
 
 ```bash
-# Queue the full rewarm (uses queue.connection / queue.name from config)
+# Queue the full warm on the default queue connection
 php artisan permissions-redis:warm --queue
+
+# Queue it on a specific connection (jobs go to that connection's default queue)
+php artisan permissions-redis:warm --queue=redis --no-flush
 
 # Queue a single user (useful in scripts after bulk assignments)
 php artisan permissions-redis:warm-user 42 --queue
 ```
 
-Under the hood this dispatches `WarmUserCacheJob` per user; the job is idempotent and safe to retry.
+`permissions-redis:warm --queue` dispatches a single `WarmAllCacheJob` (flush + warm, or an incremental rewarm with `--no-flush`); `warm-user --queue` dispatches a `WarmUserCacheJob`. Both are idempotent and safe to retry. There is no queue section in the config file: the connection comes from the option value and the queue name is the connection's default.
+
+#### Queue workers
+
+The resolver keeps an in-memory copy of the answers it has already given, which is what makes repeated checks in one request free. A `queue:work` process keeps the container (and that memory) alive across jobs, so the package resets it before every job (`Illuminate\Queue\Events\JobProcessing`), the same reset Octane gets per request. Redis stays warm; nothing to configure.
 
 #### Programmatic Access
 
@@ -685,8 +696,10 @@ The cache is automatically invalidated when:
 | `PermissionsAssigned` | `givePermissionTo()`, `revokePermissionTo()`, `syncPermissions()` on a user | Rewarm user |
 | `PermissionsSynced` | Role permissions updated | Rewarm role + all users with that role |
 | `RoleDeleted` | `Role::delete()` | Evict role + rewarm affected users |
+| *(model hook)* | `Role::save()` with a changed `name` or `guard_name` | Rewarm all users with that role |
+| *(model hook)* | `Permission::save()` or `Permission::delete()` | Rewarm affected users and roles, update group metadata |
 | `UserDeleted` | User model deleted (via `DispatchesPermissionEvents` trait) | Evict user cache |
-| `Login` | User logs in (if `warm_on_login` enabled) | Warm user cache |
+| `Login` | A configured user model logs in (if `warm_on_login` enabled) | Warm user cache |
 
 To auto-dispatch `UserDeleted`, add the trait to your User model:
 
@@ -701,7 +714,7 @@ class User extends Authenticatable
 
 #### Rate-limited cache-miss warming
 
-When a permission check lands on a user whose cache is missing in Redis, `PermissionResolver` triggers `warmUser()` automatically. To protect the database from warm storms (e.g., Redis is cold after a restart and thousands of simultaneous requests hit the same user), the resolver records each warm attempt and suppresses retries for `resolver_warm_cooldown` seconds (default `1.0s`). This is in-memory per worker; tune it via config or the `PERMISSIONS_REDIS_WARM_COOLDOWN` env variable.
+When a permission check lands on a user whose cache is missing in Redis, `PermissionResolver` triggers `warmUser()` automatically. To protect the database from warm storms (e.g., Redis is cold after a restart and thousands of simultaneous requests hit the same user), the resolver records each warm attempt and suppresses retries for `resolver_warm_cooldown` seconds (default `1.0s`). This is in-memory per worker; tune it via config or the `PERMISSIONS_REDIS_RESOLVER_WARM_COOLDOWN` env variable.
 
 #### Multi-tenant deployments
 
@@ -787,10 +800,11 @@ Or in your config:
 ```
 
 When enabled, the package listens to `RequestReceived` and automatically:
-1. Flushes the `PermissionResolver` in-memory caches (permission, role, super admin)
+1. Flushes the `PermissionResolver` in-memory caches (permission, role, super admin, warm cooldowns)
 2. Resets the `RedisPermissionRepository` cached connection, prefix, and TTL
+3. Clears the role id => name memo and the role rewarm cooldowns
 
-This ensures each Octane request starts with a clean state while still benefiting from Redis-level caching.
+This ensures each Octane request starts with a clean state while still benefiting from Redis-level caching. Queue workers get the same reset before every job without any configuration (see [Queue workers](#queue-workers)).
 
 ---
 
@@ -1004,7 +1018,7 @@ Permission checks always see the merged set. When business logic needs to distin
 | `hasPermissionTo` | `hasPermissionTo(string\|BackedEnum $permission, ?string $guardName = null)` | `bool` | Check if user has a specific permission |
 | `hasAnyPermission` | `hasAnyPermission(mixed ...$permissions)` | `bool` | Check if user has **any** of the given permissions |
 | `hasAllPermissions` | `hasAllPermissions(mixed ...$permissions)` | `bool` | Check if user has **all** of the given permissions |
-| `hasRole` | `hasRole(mixed $roles, ?string $guardName = null)` | `bool` | Check if user has a role (accepts string, int, BackedEnum, array, Collection) |
+| `hasRole` | `hasRole(mixed $roles, ?string $guardName = null)` | `bool` | Check if user has a role (accepts string, int, BackedEnum, `Role` instance, array, Collection) |
 | `hasAnyRole` | `hasAnyRole(mixed ...$roles)` | `bool` | Check if user has **any** of the given roles |
 | `hasAllRoles` | `hasAllRoles(mixed ...$roles)` | `bool` | Check if user has **all** of the given roles |
 
@@ -1015,6 +1029,7 @@ $user->hasAnyPermission('posts.edit', 'posts.delete');      // true (has at leas
 $user->hasAllPermissions('posts.edit', 'posts.delete');     // false (missing one)
 $user->hasRole('admin');                                    // true
 $user->hasRole(['admin', 'editor']);                         // true (has at least one)
+$user->hasRole($adminRole);                                 // true (Role instance, checked under its own guard)
 $user->hasAnyRole('admin', 'editor');                       // true
 $user->hasAllRoles('admin', 'editor');                      // false (missing one)
 ```
@@ -1056,10 +1071,11 @@ $user->getPermissionsViaRoles();        // Collection [Permission { name: 'posts
 | `revokePermissionTo` | `revokePermissionTo(mixed ...$permissions)` | `static` | Remove direct permissions | none |
 | `syncPermissions` | `syncPermissions(mixed ...$permissions)` | `static` | Replace all direct permissions | none |
 
-All assignment methods accept: `string`, `int` (ID), `BackedEnum`, `array`, or `Collection`.
+All assignment methods accept: `string`, `int` (ID), `BackedEnum`, `Role` / `Permission` model instances, `array`, or `Collection`.
 
 ```php
 $user->assignRole('admin', 'editor');           // additive
+$user->assignRole($editorRole);                 // model instance (Spatie style)
 $user->syncRoles('editor');                     // replaces all, user now has only 'editor'
 $user->removeRole('editor');                    // removes 'editor'
 
@@ -1099,10 +1115,13 @@ User::permission('posts.edit')->get();  // users who can edit posts (direct or v
 $role = Role::findOrCreate('editor');
 $role->syncPermissions('posts.create', 'posts.edit');    // replace (array form works too)
 $role->givePermissionTo('posts.publish');                // additive
+$role->givePermissionTo($publishPermission);             // model instance
 $role->revokePermissionTo('posts.publish');              // remove
 ```
 
-> Deleting a role dispatches `RoleDeleted` and automatically rewarms affected users' caches.
+Integer IDs and `Permission` instances are validated against the role's `guard_name` and dropped when they belong to another guard. `users()` targets the first model in `user_model` and filters the pivot by its `model_type`.
+
+> Deleting a role dispatches `RoleDeleted` and automatically rewarms affected users' caches. Renaming a role (or changing its guard) rewarms every user holding it.
 
 ### `Permission` Model Methods
 

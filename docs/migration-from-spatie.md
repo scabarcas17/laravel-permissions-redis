@@ -397,6 +397,12 @@ If you listen to Spatie events, update your listeners to use this package's even
 
 **This package** uses fixed model classes. If you extended Spatie's models, move that logic to your application (e.g., observers, global scopes).
 
+### 9. Morph maps
+
+**Spatie** writes `$user->getMorphClass()` into the `model_type` pivot column, so under `Relation::enforceMorphMap(['user' => User::class])` the rows carry the alias `user`.
+
+**This package** (4.x) reads and writes the user model's class name (`App\Models\User`) and the cache warmer filters by the classes listed in `user_model`. Rows that carry an alias are therefore invisible to `roles()`, `hasRole()` and the warm commands until they are rewritten; see the [FAQ entry](#i-use-a-morph-map) for the one-off update.
+
 ---
 
 ## Config mapping
@@ -450,6 +456,24 @@ All existing permissions, roles, and assignments carry over. The migration comma
 ### What do I do if I use `getDirectPermissions()`?
 
 Nothing since v4.1.0: `getDirectPermissions()` and `getPermissionsViaRoles()` exist with the same names and return `Permission` models. The one difference from Spatie is that they read the database (SQL), not the Redis cache; see [Behavior differences > Direct vs. role-based permission separation](#2-direct-vs-role-based-permission-separation).
+
+### I use a morph map
+
+If your app calls `Relation::enforceMorphMap()` (or `morphMap()`), Spatie stored the alias in `model_type` and this package expects the class name (see [Behavior differences > Morph maps](#9-morph-maps)). After removing Spatie, rewrite the column once for each configured user model, then warm the cache:
+
+```php
+use App\Models\User;
+use Illuminate\Support\Facades\DB;
+
+DB::table('model_has_roles')->where('model_type', 'user')->update(['model_type' => User::class]);
+DB::table('model_has_permissions')->where('model_type', 'user')->update(['model_type' => User::class]);
+```
+
+```bash
+php artisan permissions-redis:warm
+```
+
+Do this only once Spatie is gone: while both packages coexist, Spatie keeps looking for the alias.
 
 ### What's the equivalent of Spatie's team feature?
 
