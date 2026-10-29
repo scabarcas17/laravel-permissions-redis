@@ -22,10 +22,10 @@ class PermissionResolver implements PermissionResolverInterface
     /** @var array<int|string, array<string, bool>> */
     private array $roleCache = [];
 
-    /** @var array<int|string, array<string>|null> */
+    /** @var array<int|string, array<array-key, true>> each user's encoded permissions, as keys */
     private array $allPermissionsCache = [];
 
-    /** @var array<int|string, array<string>|null> */
+    /** @var array<int|string, array<array-key, true>> each user's encoded roles, as keys */
     private array $allRolesCache = [];
 
     /** @var array<int|string, bool> */
@@ -33,6 +33,14 @@ class PermissionResolver implements PermissionResolverInterface
 
     /** @var array<int|string, float> */
     private array $warmAttempts = [];
+
+    /**
+     * Users whose Redis entry is known to exist, so a process asks Redis
+     * once per user instead of before every check.
+     *
+     * @var array<int|string, true>
+     */
+    private array $verifiedUsers = [];
 
     public function __construct(
         private readonly PermissionRepositoryInterface $repository,
@@ -53,15 +61,23 @@ class PermissionResolver implements PermissionResolverInterface
             return $this->permissionCache[$userId][$cacheKey];
         }
 
-        $this->ensureUserCacheExists($userId);
+        // The first check reads the user's whole set (one SMEMBERS) and the
+        // later ones look it up in memory, rather than one SISMEMBER round
+        // trip per distinct check.
+        $permissions = $this->loadUserPermissions($userId);
 
-        $result = $this->repository->userHasPermission($userId, $cacheKey);
+        $result = isset($permissions[$cacheKey]);
 
         if (!$result && $this->wildcardEnabled()) {
-            $result = $this->matchWildcard($userId, $permission, $guard);
+            $result = $this->matchWildcard($permissions, $permission, $guard);
         }
 
-        $this->permissionCache[$userId][$cacheKey] = $result;
+        // Kept only when it came from the user's set: an answer given while
+        // the entry was missing is worked out again next time.
+        if (isset($this->allPermissionsCache[$userId])) {
+            $this->permissionCache[$userId][$cacheKey] = $result;
+        }
+
         $this->evictIfNeeded();
 
         return $result;
@@ -76,11 +92,13 @@ class PermissionResolver implements PermissionResolverInterface
             return $this->roleCache[$userId][$cacheKey];
         }
 
-        $this->ensureUserCacheExists($userId);
+        $roles = $this->loadUserRoles($userId);
+        $result = isset($roles[$cacheKey]);
 
-        $result = $this->repository->userHasRole($userId, $cacheKey);
+        if (isset($this->allRolesCache[$userId])) {
+            $this->roleCache[$userId][$cacheKey] = $result;
+        }
 
-        $this->roleCache[$userId][$cacheKey] = $result;
         $this->evictIfNeeded();
 
         return $result;
@@ -89,7 +107,7 @@ class PermissionResolver implements PermissionResolverInterface
     /** @return Collection<int, PermissionDTO> */
     public function getAllPermissions(int|string $userId, ?string $guard = null): Collection
     {
-        $names = $this->loadUserPermissions($userId);
+        $names = $this->encodedNames($this->loadUserPermissions($userId));
 
         if ($names === []) {
             return new Collection();
@@ -120,7 +138,7 @@ class PermissionResolver implements PermissionResolverInterface
     /** @return Collection<int, string> */
     public function getAllRoles(int|string $userId, ?string $guard = null): Collection
     {
-        $roles = $this->loadUserRoles($userId);
+        $roles = $this->encodedNames($this->loadUserRoles($userId));
 
         return collect($roles)
             ->map(fn (string $encoded): array => $this->decodeEntry($encoded))
@@ -137,6 +155,7 @@ class PermissionResolver implements PermissionResolverInterface
         $this->allRolesCache = [];
         $this->superAdminCache = [];
         $this->warmAttempts = [];
+        $this->verifiedUsers = [];
     }
 
     public function flushUser(int|string $userId): void
@@ -148,6 +167,7 @@ class PermissionResolver implements PermissionResolverInterface
             $this->allRolesCache[$userId],
             $this->superAdminCache[$userId],
             $this->warmAttempts[$userId],
+            $this->verifiedUsers[$userId],
         );
     }
 
@@ -167,6 +187,7 @@ class PermissionResolver implements PermissionResolverInterface
         $this->allRolesCache = $this->trimToLimit($this->allRolesCache, $limit);
         $this->superAdminCache = $this->trimToLimit($this->superAdminCache, $limit);
         $this->warmAttempts = $this->trimToLimit($this->warmAttempts, $limit);
+        $this->verifiedUsers = $this->trimToLimit($this->verifiedUsers, $limit);
     }
 
     /**
@@ -187,26 +208,48 @@ class PermissionResolver implements PermissionResolverInterface
         return array_slice($cache, $overflow, null, true);
     }
 
-    private function ensureUserCacheExists(int|string $userId): void
+    /**
+     * Whether the user's Redis entry exists, warming it from the database on
+     * a miss. A miss inside the warm cooldown answers false without warming.
+     */
+    private function ensureUserCacheExists(int|string $userId): bool
     {
-        if ($this->repository->userCacheExists($userId)) {
-            return;
+        if (isset($this->verifiedUsers[$userId])) {
+            return true;
         }
 
+        if (!$this->repository->userCacheExists($userId) && !$this->warmMissingUser($userId)) {
+            return false;
+        }
+
+        $this->verifiedUsers[$userId] = true;
+
+        return true;
+    }
+
+    private function warmMissingUser(int|string $userId): bool
+    {
         $cooldown = $this->warmCooldownSeconds();
 
         if ($cooldown > 0.0 && isset($this->warmAttempts[$userId])) {
             $elapsed = microtime(true) - $this->warmAttempts[$userId];
 
             if ($elapsed < $cooldown) {
-                return;
+                return false;
             }
         }
 
-        $this->warmAttempts[$userId] = microtime(true);
-
         $this->log("Auth cache miss for user {$userId}, warming from database.", 'debug');
-        $this->cacheManager->warmUser($userId);
+
+        try {
+            $this->cacheManager->warmUser($userId);
+        } finally {
+            // Stamped after the call, failed or not: warmUser() drops this
+            // user's in-memory state, an earlier stamp included.
+            $this->warmAttempts[$userId] = microtime(true);
+        }
+
+        return $this->repository->userCacheExists($userId);
     }
 
     private function warmCooldownSeconds(): float
@@ -233,7 +276,7 @@ class PermissionResolver implements PermissionResolverInterface
         }
 
         // Single SMEMBERS call instead of one SISMEMBER per guard
-        $roles = $this->loadUserRoles($userId);
+        $roles = $this->encodedNames($this->loadUserRoles($userId));
 
         foreach ($roles as $encoded) {
             [, $name] = $this->decodeEntry($encoded);
@@ -245,7 +288,9 @@ class PermissionResolver implements PermissionResolverInterface
             }
         }
 
-        $this->superAdminCache[$userId] = false;
+        if (isset($this->allRolesCache[$userId])) {
+            $this->superAdminCache[$userId] = false;
+        }
 
         return false;
     }
@@ -285,11 +330,10 @@ class PermissionResolver implements PermissionResolverInterface
         return $enabled;
     }
 
-    private function matchWildcard(int|string $userId, string $permission, string $guard): bool
+    /** @param array<array-key, true> $permissions the user's encoded permissions, as keys */
+    private function matchWildcard(array $permissions, string $permission, string $guard): bool
     {
-        $allPermissions = $this->loadUserPermissions($userId);
-
-        foreach ($allPermissions as $stored) {
+        foreach ($this->encodedNames($permissions) as $stored) {
             [$storedGuard, $storedName] = $this->decodeEntry($stored);
 
             if ($storedGuard === $guard && str_contains($storedName, '*') && fnmatch($storedName, $permission)) {
@@ -300,46 +344,55 @@ class PermissionResolver implements PermissionResolverInterface
         return false;
     }
 
-    /** @return array<string> */
+    /** @return array<array-key, true> the user's encoded permissions, as keys */
     private function loadUserPermissions(int|string $userId): array
     {
         if (isset($this->allPermissionsCache[$userId])) {
             return $this->allPermissionsCache[$userId];
         }
 
-        $this->ensureUserCacheExists($userId);
-
-        $names = $this->repository->getUserPermissions($userId);
-        $this->allPermissionsCache[$userId] = $names;
-
-        foreach ($names as $encoded) {
-            $this->permissionCache[$userId][$encoded] = true;
+        if (!$this->ensureUserCacheExists($userId)) {
+            // Missing and cooling down: nothing to read, and nothing kept,
+            // so a later call looks again.
+            return [];
         }
+
+        $permissions = array_fill_keys($this->repository->getUserPermissions($userId), true);
+        $this->allPermissionsCache[$userId] = $permissions;
 
         $this->evictIfNeeded();
 
-        return $names;
+        return $permissions;
     }
 
-    /** @return array<string> */
+    /** @return array<array-key, true> the user's encoded roles, as keys */
     private function loadUserRoles(int|string $userId): array
     {
         if (isset($this->allRolesCache[$userId])) {
             return $this->allRolesCache[$userId];
         }
 
-        $this->ensureUserCacheExists($userId);
-
-        $roles = $this->repository->getUserRoles($userId);
-        $this->allRolesCache[$userId] = $roles;
-
-        foreach ($roles as $encoded) {
-            $this->roleCache[$userId][$encoded] = true;
+        if (!$this->ensureUserCacheExists($userId)) {
+            return [];
         }
+
+        $roles = array_fill_keys($this->repository->getUserRoles($userId), true);
+        $this->allRolesCache[$userId] = $roles;
 
         $this->evictIfNeeded();
 
         return $roles;
+    }
+
+    /**
+     * @param array<array-key, true> $set
+     *
+     * @return array<int, string>
+     */
+    private function encodedNames(array $set): array
+    {
+        // PHP stores integer-like string keys as ints; the entries are strings.
+        return array_map(fn (int|string $name): string => (string) $name, array_keys($set));
     }
 
     /**

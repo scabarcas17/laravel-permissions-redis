@@ -17,7 +17,7 @@ test('hasPermission works with UUID string user ID', function () {
     $uuid = '550e8400-e29b-41d4-a716-446655440000';
 
     $repository->shouldReceive('userCacheExists')->with($uuid)->once()->andReturn(true);
-    $repository->shouldReceive('userHasPermission')->with($uuid, 'web|posts.create')->once()->andReturn(true);
+    $repository->shouldReceive('getUserPermissions')->with($uuid)->once()->andReturn(['web|posts.create']);
 
     expect($resolver->hasPermission($uuid, 'posts.create'))->toBeTrue();
 });
@@ -30,7 +30,7 @@ test('hasRole works with UUID string user ID', function () {
     $uuid = '550e8400-e29b-41d4-a716-446655440000';
 
     $repository->shouldReceive('userCacheExists')->with($uuid)->once()->andReturn(true);
-    $repository->shouldReceive('userHasRole')->with($uuid, 'web|admin')->once()->andReturn(true);
+    $repository->shouldReceive('getUserRoles')->with($uuid)->once()->andReturn(['web|admin']);
 
     expect($resolver->hasRole($uuid, 'admin'))->toBeTrue();
 });
@@ -80,14 +80,14 @@ test('flushUser works with UUID string user ID', function () {
 
     // Populate in-memory cache (first call)
     $repository->shouldReceive('userCacheExists')->with($uuid)->andReturn(true);
-    $repository->shouldReceive('userHasPermission')->with($uuid, 'web|posts.create')->once()->andReturn(true);
+    $repository->shouldReceive('getUserPermissions')->with($uuid)->once()->andReturn(['web|posts.create']);
     expect($resolver->hasPermission($uuid, 'posts.create'))->toBeTrue();
 
     // Flush user's in-memory cache
     $resolver->flushUser($uuid);
 
     // After flush, resolver should query repository again (not serve from in-memory)
-    $repository->shouldReceive('userHasPermission')->with($uuid, 'web|posts.create')->once()->andReturn(false);
+    $repository->shouldReceive('getUserPermissions')->with($uuid)->once()->andReturn([]);
     expect($resolver->hasPermission($uuid, 'posts.create'))->toBeFalse();
 });
 
@@ -128,7 +128,7 @@ test('resolver works with ULID string user ID', function () {
     $ulid = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 
     $repository->shouldReceive('userCacheExists')->with($ulid)->once()->andReturn(true);
-    $repository->shouldReceive('userHasPermission')->with($ulid, 'web|users.manage')->once()->andReturn(true);
+    $repository->shouldReceive('getUserPermissions')->with($ulid)->once()->andReturn(['web|users.manage']);
 
     expect($resolver->hasPermission($ulid, 'users.manage'))->toBeTrue();
 });
@@ -145,8 +145,8 @@ test('resolver handles both int and string user IDs simultaneously', function ()
 
     $repository->shouldReceive('userCacheExists')->with($intId)->andReturn(true);
     $repository->shouldReceive('userCacheExists')->with($uuid)->andReturn(true);
-    $repository->shouldReceive('userHasPermission')->with($intId, 'web|posts.create')->once()->andReturn(true);
-    $repository->shouldReceive('userHasPermission')->with($uuid, 'web|posts.create')->once()->andReturn(false);
+    $repository->shouldReceive('getUserPermissions')->with($intId)->once()->andReturn(['web|posts.create']);
+    $repository->shouldReceive('getUserPermissions')->with($uuid)->once()->andReturn([]);
 
     expect($resolver->hasPermission($intId, 'posts.create'))->toBeTrue();
     expect($resolver->hasPermission($uuid, 'posts.create'))->toBeFalse();

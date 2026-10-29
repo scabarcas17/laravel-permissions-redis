@@ -16,14 +16,14 @@ test('flush clears all in-memory caches', function () {
 
     // Populate in-memory cache
     $repository->shouldReceive('userCacheExists')->with(1)->andReturn(true);
-    $repository->shouldReceive('userHasPermission')->with(1, 'web|posts.create')->once()->andReturn(true);
+    $repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|posts.create']);
     $resolver->hasPermission(1, 'posts.create');
 
     // Simulate Octane request boundary
     $resolver->flush();
 
     // After flush, should hit repository again (not in-memory cache)
-    $repository->shouldReceive('userHasPermission')->with(1, 'web|posts.create')->once()->andReturn(false);
+    $repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn([]);
     expect($resolver->hasPermission(1, 'posts.create'))->toBeFalse();
 });
 
@@ -33,12 +33,12 @@ test('flush clears role cache', function () {
     $resolver = new PermissionResolver($repository, $cacheManager);
 
     $repository->shouldReceive('userCacheExists')->with(1)->andReturn(true);
-    $repository->shouldReceive('userHasRole')->with(1, 'web|admin')->once()->andReturn(true);
+    $repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn(['web|admin']);
     $resolver->hasRole(1, 'admin');
 
     $resolver->flush();
 
-    $repository->shouldReceive('userHasRole')->with(1, 'web|admin')->once()->andReturn(false);
+    $repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn([]);
     expect($resolver->hasRole(1, 'admin'))->toBeFalse();
 });
 
@@ -115,13 +115,13 @@ test('stale permission data does not leak after flush', function () {
 
     // Request 1: user 1 has admin role
     $repository->shouldReceive('userCacheExists')->with(1)->andReturn(true);
-    $repository->shouldReceive('userHasRole')->with(1, 'web|admin')->once()->andReturn(true);
+    $repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn(['web|admin']);
     expect($resolver->hasRole(1, 'admin'))->toBeTrue();
 
     // Request 2: user 1 lost admin role (simulating Octane boundary)
     $resolver->flush();
 
-    $repository->shouldReceive('userHasRole')->with(1, 'web|admin')->once()->andReturn(false);
+    $repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn(['web|editor']);
     expect($resolver->hasRole(1, 'admin'))->toBeFalse();
 });
 
@@ -132,14 +132,14 @@ test('different users do not share cached data after flush', function () {
 
     // Request 1: user 1 check
     $repository->shouldReceive('userCacheExists')->with(1)->andReturn(true);
-    $repository->shouldReceive('userHasPermission')->with(1, 'web|admin.panel')->once()->andReturn(true);
+    $repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|admin.panel']);
     $resolver->hasPermission(1, 'admin.panel');
 
     // Request 2: different user, flush between
     $resolver->flush();
 
     $repository->shouldReceive('userCacheExists')->with(2)->andReturn(true);
-    $repository->shouldReceive('userHasPermission')->with(2, 'web|admin.panel')->once()->andReturn(false);
+    $repository->shouldReceive('getUserPermissions')->with(2)->once()->andReturn([]);
     expect($resolver->hasPermission(2, 'admin.panel'))->toBeFalse();
 });
 
