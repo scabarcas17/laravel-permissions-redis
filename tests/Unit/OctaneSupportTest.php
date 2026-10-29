@@ -16,14 +16,14 @@ test('flush clears all in-memory caches', function () {
 
     // Populate in-memory cache
     $repository->shouldReceive('userCacheExists')->with(1)->andReturn(true);
-    $repository->shouldReceive('userHasPermission')->with(1, 'web|posts.create')->once()->andReturn(true);
+    $repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|posts.create']);
     $resolver->hasPermission(1, 'posts.create');
 
     // Simulate Octane request boundary
     $resolver->flush();
 
     // After flush, should hit repository again (not in-memory cache)
-    $repository->shouldReceive('userHasPermission')->with(1, 'web|posts.create')->once()->andReturn(false);
+    $repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn([]);
     expect($resolver->hasPermission(1, 'posts.create'))->toBeFalse();
 });
 
@@ -33,12 +33,12 @@ test('flush clears role cache', function () {
     $resolver = new PermissionResolver($repository, $cacheManager);
 
     $repository->shouldReceive('userCacheExists')->with(1)->andReturn(true);
-    $repository->shouldReceive('userHasRole')->with(1, 'web|admin')->once()->andReturn(true);
+    $repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn(['web|admin']);
     $resolver->hasRole(1, 'admin');
 
     $resolver->flush();
 
-    $repository->shouldReceive('userHasRole')->with(1, 'web|admin')->once()->andReturn(false);
+    $repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn([]);
     expect($resolver->hasRole(1, 'admin'))->toBeFalse();
 });
 
@@ -115,13 +115,13 @@ test('stale permission data does not leak after flush', function () {
 
     // Request 1: user 1 has admin role
     $repository->shouldReceive('userCacheExists')->with(1)->andReturn(true);
-    $repository->shouldReceive('userHasRole')->with(1, 'web|admin')->once()->andReturn(true);
+    $repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn(['web|admin']);
     expect($resolver->hasRole(1, 'admin'))->toBeTrue();
 
     // Request 2: user 1 lost admin role (simulating Octane boundary)
     $resolver->flush();
 
-    $repository->shouldReceive('userHasRole')->with(1, 'web|admin')->once()->andReturn(false);
+    $repository->shouldReceive('getUserRoles')->with(1)->once()->andReturn(['web|editor']);
     expect($resolver->hasRole(1, 'admin'))->toBeFalse();
 });
 
@@ -132,25 +132,28 @@ test('different users do not share cached data after flush', function () {
 
     // Request 1: user 1 check
     $repository->shouldReceive('userCacheExists')->with(1)->andReturn(true);
-    $repository->shouldReceive('userHasPermission')->with(1, 'web|admin.panel')->once()->andReturn(true);
+    $repository->shouldReceive('getUserPermissions')->with(1)->once()->andReturn(['web|admin.panel']);
     $resolver->hasPermission(1, 'admin.panel');
 
     // Request 2: different user, flush between
     $resolver->flush();
 
     $repository->shouldReceive('userCacheExists')->with(2)->andReturn(true);
-    $repository->shouldReceive('userHasPermission')->with(2, 'web|admin.panel')->once()->andReturn(false);
+    $repository->shouldReceive('getUserPermissions')->with(2)->once()->andReturn([]);
     expect($resolver->hasPermission(2, 'admin.panel'))->toBeFalse();
 });
 
-test('Octane RequestReceived listener flushes resolver, repository state, and role cache', function () {
-    config()->set('permissions-redis.octane.reset_on_request', true);
+test('Octane RequestReceived flushes resolver, repository state, and role cache with no config', function () {
+    // Ignored since 4.3.0: the reset runs whatever the option says.
+    config()->set('permissions-redis.octane.reset_on_request', false);
 
+    // At least once: an app booted after another test defined the event class
+    // has registered the listener already, and the boot below adds another.
     $resolver = Mockery::mock(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class);
-    $resolver->shouldReceive('flush')->once();
+    $resolver->shouldReceive('flush')->atLeast()->once();
 
     $repo = Mockery::mock(RedisPermissionRepository::class);
-    $repo->shouldReceive('resetState')->once();
+    $repo->shouldReceive('resetState')->atLeast()->once();
 
     $this->app->instance(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class, $resolver);
     $this->app->instance(RedisPermissionRepository::class, $repo);
@@ -169,6 +172,32 @@ test('Octane RequestReceived listener flushes resolver, repository state, and ro
     event(new $requestReceivedClass());
 
     expect($cacheProp->getValue())->toBe([]);
+});
+
+test('RequestReceived resets the in-memory state so a worker does not keep an earlier read', function () {
+    $repo = new \Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+    $this->app->forgetInstance(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class);
+
+    $requestReceivedClass = 'Laravel\\Octane\\Events\\RequestReceived';
+
+    if (!class_exists($requestReceivedClass)) {
+        eval('namespace Laravel\\Octane\\Events; class RequestReceived {}');
+    }
+
+    (new \Scabarcas\LaravelPermissionsRedis\PermissionsRedisServiceProvider($this->app))->boot();
+
+    $resolver = $this->app->make(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class);
+
+    $repo->setUserPermissions(1, ['web|posts.edit']);
+    expect($resolver->hasPermission(1, 'posts.edit', 'web'))->toBeTrue();
+
+    // Another worker revokes the permission and rewarms Redis.
+    $repo->setUserPermissions(1, []);
+
+    event(new $requestReceivedClass());
+
+    expect($resolver->hasPermission(1, 'posts.edit', 'web'))->toBeFalse();
 });
 
 // ─── Queue workers ───

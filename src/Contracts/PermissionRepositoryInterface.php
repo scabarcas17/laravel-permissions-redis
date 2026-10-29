@@ -33,6 +33,12 @@ interface PermissionRepositoryInterface
     /** @param array<int|string> $userIds */
     public function setRoleUsers(int|string $roleId, array $userIds): void;
 
+    /**
+     * Whether the user has a cache entry. The answer changes as entries are
+     * warmed, expire or are evicted.
+     *
+     * @phpstan-impure
+     */
     public function userCacheExists(int|string $userId): bool;
 
     public function deleteUserCache(int|string $userId): void;

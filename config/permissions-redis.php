@@ -195,9 +195,9 @@ return [
     | Octane Support
     |--------------------------------------------------------------------------
     |
-    | When running under Laravel Octane, singletons persist across requests.
-    | Enable this to automatically flush in-memory caches between requests,
-    | preventing stale permission data from leaking across requests.
+    | Ignored since 4.3.0: under Laravel Octane the package resets its
+    | in-memory state on every request, whatever this says, as it does before
+    | every queue job. Kept so published configs keep loading; removed in 5.0.
     |
     */
 

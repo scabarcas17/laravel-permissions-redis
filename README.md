@@ -122,7 +122,7 @@ flowchart LR
     DB[("Database\nSource of truth:\npermissions, roles,\nassignments")]
 
     User -- "HTTP requests" --> App
-    App -- "Read: SISMEMBER, SMEMBERS\nWrite: warm / evict" --> Redis
+    App -- "Read: EVAL (both sets), HMGET\nWrite: warm / evict" --> Redis
     App -- "Read/Write:\nrole & permission\ndefinitions" --> DB
 ```
 
@@ -145,7 +145,7 @@ flowchart TB
         subgraph core ["Resolution & Cache"]
             direction LR
             Resolver["PermissionResolver\nIn-memory cache\nWildcard matching"]
-            Repo["RedisPermissionRepository\nSISMEMBER · SMEMBERS\nMULTI/EXEC atomicity"]
+            Repo["RedisPermissionRepository\nOne-trip reads (EVAL)\nMULTI/EXEC atomicity"]
         end
 
         subgraph sync ["Sync & Events"]
@@ -176,21 +176,27 @@ flowchart TB
 flowchart TD
     A["hasPermissionTo('posts.edit')"] --> B{In-memory\ncache?}
     B -- "Hit" --> C["Return cached result"]
-    B -- "Miss" --> D{"Redis\nSISMEMBER?"}
-    D -- "Hit" --> E["Cache in memory\nand return"]
-    D -- "Miss" --> F{"User cache\nexists in Redis?"}
-    F -- "Yes" --> K{"Wildcard\nenabled?"}
-    F -- "No (cold start)" --> H["AuthorizationCacheManager\n::warmUser()"]
+    B -- "Miss" --> D{"User's sets read\nin this process?"}
+    D -- "Yes" --> E{"In the set?"}
+    D -- "No" --> F["One EVAL reads the\npermission and role sets"]
+    F --> G{"Entry in Redis?"}
+    G -- "Yes" --> P["Keep both sets\nfor the process"]
+    G -- "No (cold start)" --> H["AuthorizationCacheManager\n::warmUser()"]
     H --> I["Query DB:\ndirect perms + role perms"]
     I --> J["Write merged SETs\nto Redis"]
-    J --> D
+    J --> F
+    P --> E
 
+    E -- "Yes" --> N["Return true"]
+    E -- "No" --> K{"Wildcard\nenabled?"}
     K -- "No" --> L["Permission denied"]
-    K -- "Yes" --> M["fnmatch() scan\nall user perms"]
-    M -- "Match" --> N["Return true"]
+    K -- "Yes" --> M["fnmatch() over\nthe same set"]
+    M -- "Match" --> N
     M -- "No match" --> L
 
 ```
+
+Both sets come back from one `EVAL` on the first check, so a request with 30 distinct checks sends one Redis command for them, not one per check. A server that refuses scripts (an ACL without `@scripting`, some proxies) gets two `SMEMBERS` instead.
 
 ### Cache Invalidation Flow
 
@@ -309,7 +315,7 @@ All options live in `config/permissions-redis.php`:
 | `resolver_cache_limit` | `PERMISSIONS_REDIS_RESOLVER_CACHE_LIMIT` | `1000` | Max users held in each in-memory resolver cache before the oldest entries are evicted |
 | `resolver_warm_cooldown` | `PERMISSIONS_REDIS_RESOLVER_WARM_COOLDOWN` | `1.0` | Seconds before a failed cache-miss warm is retried for the same user |
 | `tenancy.enabled` / `tenancy.resolver` | `PERMISSIONS_REDIS_TENANCY_ENABLED` / `PERMISSIONS_REDIS_TENANCY_RESOLVER` | `false` / `null` | Per-tenant key isolation, see [Multi-Tenancy](#multi-tenancy) |
-| `octane.reset_on_request` | `PERMISSIONS_REDIS_OCTANE_RESET` | `false` | Reset in-memory state per Octane request, see [Laravel Octane](#laravel-octane) |
+| `octane.reset_on_request` | `PERMISSIONS_REDIS_OCTANE_RESET` | `false` | Ignored since 4.3.0: the reset always runs under Octane, see [Laravel Octane](#laravel-octane). Removed in 5.0 |
 | `queue.connection` / `queue.name` | `PERMISSIONS_REDIS_QUEUE_CONNECTION` / `PERMISSIONS_REDIS_QUEUE` | `null` / `null` | Connection and queue for the warm jobs (`null` = defaults), see [Artisan Commands](#artisan-commands) |
 | `model_morph_key_type` | `PERMISSIONS_REDIS_MORPH_KEY_TYPE` | `'int'` | `model_id` column type: `int`, `uuid` or `ulid` |
 | `use_morph_map` | `PERMISSIONS_REDIS_USE_MORPH_MAP` | `false` | Store the morph alias instead of the class name in `model_type`, see [Morph Maps](#morph-maps) |
@@ -696,7 +702,7 @@ php artisan permissions-redis:warm-user 42 --queue
 
 #### Queue workers
 
-The resolver keeps an in-memory copy of the answers it has already given, which is what makes repeated checks in one request free. A `queue:work` process keeps the container (and that memory) alive across jobs, so the package resets it before every job (`Illuminate\Queue\Events\JobProcessing`), the same reset Octane gets per request. Redis stays warm; nothing to configure.
+The resolver keeps an in-memory copy of each user's roles and permissions once it has read them from Redis, which is what makes every check after the first one free. A `queue:work` process keeps the container (and that memory) alive across jobs, so the package resets it before every job (`Illuminate\Queue\Events\JobProcessing`), the same reset Octane gets per request. Redis stays warm; nothing to configure.
 
 #### Programmatic Access
 
@@ -804,29 +810,16 @@ $user->hasPermissionTo('posts.create'); // true
 
 ## Laravel Octane
 
-When running under [Laravel Octane](https://laravel.com/docs/octane), singletons persist across requests. This package provides built-in support to flush in-memory caches between requests, preventing stale permission data from leaking.
+When running under [Laravel Octane](https://laravel.com/docs/octane), singletons persist across requests. The resolver answers from what it read for each user, so a worker that kept that memory would keep its first read of every user it served, permissions revoked by other workers included. The package resets it at the start of every Octane request; there is nothing to configure.
 
-### Setup
-
-```env
-PERMISSIONS_REDIS_OCTANE_RESET=true
-```
-
-Or in your config:
-
-```php
-// config/permissions-redis.php
-'octane' => [
-    'reset_on_request' => true,
-],
-```
-
-When enabled, the package listens to `RequestReceived` and automatically:
-1. Flushes the `PermissionResolver` in-memory caches (permission, role, super admin, warm cooldowns)
+On every `RequestReceived` the package:
+1. Flushes the `PermissionResolver` in-memory caches (each user's sets and answers, super admin flags, warm cooldowns)
 2. Resets the `RedisPermissionRepository` cached connection, prefix, and TTL
 3. Clears the role id => name memo and the role rewarm cooldowns
 
-This ensures each Octane request starts with a clean state while still benefiting from Redis-level caching. Queue workers get the same reset before every job without any configuration (see [Queue workers](#queue-workers)).
+Redis stays warm, so a request pays one Redis round trip for each user it checks (one `EVAL` for both sets). Queue workers get the same reset before every job (see [Queue workers](#queue-workers)).
+
+Up to 4.2.0 the reset was opt-in through `octane.reset_on_request` (`PERMISSIONS_REDIS_OCTANE_RESET`). The option is ignored since 4.3.0 and goes away in 5.0; you can delete it from your published config.
 
 ---
 
@@ -1378,7 +1371,7 @@ $this->app->singleton(
 | Query scopes (`scopeRole`, `scopePermission`) | ✅ | ✅ |
 | **Cache** | | |
 | Cache backend | Laravel Cache (any driver) | Redis directly (SET structures) |
-| Permission check complexity | O(n) array scan | O(1) `SISMEMBER` |
+| Permission check complexity | O(n) array scan | O(1) lookup in the user's set, read once per request |
 | In-memory request cache | ❌ | ✅ |
 | Automatic cache invalidation | Forget all on change | Surgical warm per user/role |
 | Cache warm on login | ❌ | ✅ |
@@ -1406,37 +1399,33 @@ $this->app->singleton(
 
 ### Performance Benchmark
 
-A [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) compares both packages side by side, run with `php artisan bench:markdown 1,10,50 --warm=5 --runs=30` (Apple Silicon, PHP 8.x, predis, local Redis). Each "request" resets in-memory state, so neither package carries PHP process memory across requests (matching PHP-FPM, and Octane where this package resets its in-memory cache per request). The hardware-independent result is the **query count** (4 queries hitting several tables versus 1). Wall-clock is modest and depends heavily on your database, so read the latency tables with that in mind.
+A [standalone benchmark application](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) runs five ways to resolve permissions on the same data and the same request (27 `hasPermissionTo` calls, 4 `hasRole` calls, the four batch checks, `getAllPermissions()` and `getRoleNames()`): a query per check, Spatie as installed, Spatie with eager loading, Spatie with a per-user `Cache::remember()`, and this package. It runs in Docker with MySQL 8.4 and Redis 7 behind toxiproxy, which can add a fixed delay to every response. The numbers below are medians of three executions of `bench:markdown 1 --warm=5 --runs=30` on PHP 8.4 with phpredis; every iteration starts from empty in-process caches, as a new request would.
 
-#### Database queries per authorization-heavy request
+#### Round trips per request
 
-| Scenario | spatie/laravel-permission | laravel-permissions-redis | Reduction |
-|----------|:------------------------:|:-------------------------:|:---------:|
-| 1 request (37 checks) | 4 DB queries | 1 DB query | **75%** |
-| 10 requests | 40 DB queries | 10 DB queries | **75%** |
-| 50 requests | 200 DB queries | 50 DB queries | **75%** |
+The hardware-independent result. With Laravel's default native prepared statements a MySQL query takes two round trips (prepare, then execute).
 
-Spatie caches the *global* permission/role registry, but each `User::find()` still lazy-loads that user's role and permission relations from the database (about 4 queries across several tables). This package keeps the resolved per-user set in Redis, so the only database query left is the `SELECT ... FROM users` lookup; the rest is served from Redis plus a per-request in-memory cache.
+| Strategy | SQL queries | Redis commands | Round trips |
+|----------|:-----------:|:--------------:|:-----------:|
+| Query per check (hand-rolled `Gate::before()`) | 41 | 0 | 82 |
+| spatie/laravel-permission | 4 | 0 | 8 |
+| Spatie + eager loading | 4 | 0 | 8 |
+| Spatie + per-user `Cache::remember()` | 1 | 1 | 3 |
+| **laravel-permissions-redis 4.3** | 1 | 2 | 4 |
+| laravel-permissions-redis 4.2 | 1 | 67 | 69 |
 
 #### Wall-clock per request (median, p50)
 
-On in-process **SQLite** (database queries are nearly free, which isolates the Redis/in-memory paths):
+| Strategy | Same network | +1 ms per response |
+|----------|:------------:|:------------------:|
+| Query per check | 12.20 ms | 147.01 ms |
+| spatie/laravel-permission | 3.30 ms | 15.77 ms |
+| Spatie + eager loading | 3.27 ms | 15.25 ms |
+| Spatie + per-user `Cache::remember()` | 0.36 ms | 4.46 ms |
+| **laravel-permissions-redis 4.3** | 0.65 ms | 6.16 ms |
+| laravel-permissions-redis 4.2 | 6.15 ms | 106.57 ms |
 
-| Scenario | spatie/laravel-permission | laravel-permissions-redis | Speedup |
-|----------|:------------------------:|:-------------------------:|:-------:|
-| 1 request (37 checks) | 2.22 ms | 1.70 ms | ~1.3x |
-| 10 requests | 23.0 ms | 16.4 ms | ~1.4x |
-| 50 requests | 118 ms | 82 ms | ~1.45x |
-
-On **MySQL over TCP** (a realistic networked database; numbers are noisy across runs):
-
-| Scenario | spatie/laravel-permission | laravel-permissions-redis | Speedup |
-|----------|:------------------------:|:-------------------------:|:-------:|
-| 1 request (37 checks) | ~3.5 ms | ~3.8 ms | ~1.0x (often a wash) |
-| 10 requests | ~36 ms | ~36 ms | ~1.0x |
-| 50 requests | ~185 ms | ~140 ms | ~1.3x |
-
-> Each request exercises 27 `hasPermissionTo` calls, 4 `hasRole` calls, 4 batch ops, and 2 collection calls. On SQLite, avoiding 3 relation queries shows up as ~1.4x. On a networked database this package replaces those DB queries with several Redis reads (`SMEMBERS` / `HMGET`) over the same network, so latency lands close to Spatie plus cache and the edge is small and noisy (clear only on authorization-heavy requests). It was never the order of magnitude older numbers implied. The durable, hardware-independent difference is the query count above; the latency benefit is real but modest and database-dependent.
+> Round trips decide the order. On the same network Spatie's cost is mostly PHP (hydrating the relations and scanning collections); with 1 ms added to every response each strategy pays about its round-trip count times 1.5 ms, so Spatie's 8 come to about 16 ms and this package's 4 to about 6 ms. Eager loading removes no queries. A per-user `Cache::remember()` is the fastest read, one cache GET, but keeping it in step with role changes is left to you: a change to a role means forgetting the entry of every user who holds it, or flushing them all. This package stays within a round trip of that read and rewarms only the users a change touches. Up to 4.2 it sent a Redis command per distinct check (67 here), which put it behind Spatie as soon as Redis was more than a loopback away; 4.3 reads both of the user's sets in one `EVAL`.
 
 #### How the two approaches differ
 
@@ -1444,13 +1433,13 @@ On **MySQL over TCP** (a realistic networked database; numbers are noisy across 
 |--------|---------------------------|---------------------------|
 | **What's cached globally** | Permission/role registry (in the Cache store) | Same data, denormalized into per-user/per-role Redis SETs |
 | **Per-user resolution** | Lazy-loads the user's role/permission relations from the DB each request | Reads the resolved per-user set from Redis |
-| **Permission check** | In-memory check once the relations are loaded | `SISMEMBER` against a Redis SET, then in-memory for the rest of the request |
+| **Permission check** | In-memory check once the relations are loaded | Both sets read in one `EVAL` on the first check, then in-memory for the rest of the request |
 | **Invalidation** | `forgetCachedPermissions()` drops the whole registry cache | Surgical: rewarms only the affected user/role |
 | **After a change** | Next requests rebuild the registry from the DB | Other users' caches are untouched |
 
 #### Where it actually helps
 
-- **Reducing database load.** The durable win is 75% fewer DB queries per request (across several tables), which shifts authorization reads off the database and its connection pool onto Redis. It also gives a modest latency win, larger on slower or more remote databases.
+- **Reducing database load.** The durable win is 75% fewer DB queries per request (across several tables), which shifts authorization reads off the database and its connection pool onto Redis. A check-heavy request also gets faster than with Spatie: about 5x on the same network and 2.5x with 1 ms of latency in the benchmark above.
 - **Frequent role/permission changes.** Spatie drops the whole registry cache on any change; this package rewarms only the affected user(s), avoiding a cache-rebuild stampede.
 - **Multi-tenant apps.** Per-tenant Redis key isolation is built in.
 
@@ -1461,8 +1450,11 @@ If your app runs a handful of checks per request at low traffic, Spatie with its
 ```bash
 git clone https://github.com/scabarcas17/laravel-permissions-redis-benchmark.git
 cd laravel-permissions-redis-benchmark
-docker compose up -d
-# Open http://localhost:8080
+export COMPOSE_FILE=docker-compose.yml:docker-compose.latency.yml
+docker compose up -d --build
+docker compose exec app php artisan bench:latency 1   # 0 removes the delay
+docker compose exec app php artisan bench:markdown 1 --warm=5 --runs=30
+# Dashboard: http://localhost:8080
 ```
 
 See the [benchmark repository](https://github.com/scabarcas17/laravel-permissions-redis-benchmark) for full details, screenshots, and instructions.
@@ -1562,9 +1554,9 @@ php artisan permissions-redis:migrate-from-spatie
    php artisan permissions-redis:warm-user {userId}
    ```
 
-4. For Octane users, ensure `reset_on_request` is enabled so in-memory caches don't persist across requests:
-   ```env
-   PERMISSIONS_REDIS_OCTANE_RESET=true
+4. In a long-running process of your own (a daemon command, a custom worker loop), flush the resolver between units of work; Octane requests and queue jobs do it on their own:
+   ```php
+   app(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class)->flush();
    ```
 
 ### Permissions not detected after assignment

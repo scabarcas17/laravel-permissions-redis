@@ -215,3 +215,24 @@ test('replaceSet applies TTL so keys expire', function () {
 
     expect($ttl)->toBeGreaterThan(0)->toBeLessThanOrEqual(3600);
 });
+
+// ─── getUserSets ───
+
+test('getUserSets reads both sets at once and answers null for a user without an entry', function () {
+    $this->repo->setUserPermissions(1, ['web|posts.edit', 'web|posts.view']);
+    $this->repo->setUserRoles(1, ['web|editor']);
+
+    $sets = $this->repo->getUserSets(1);
+
+    expect($sets)->not->toBeNull()
+        ->and($sets['permissions'])->toEqualCanonicalizing(['web|posts.edit', 'web|posts.view'])
+        ->and($sets['roles'])->toBe(['web|editor'])
+        ->and($this->repo->getUserSets(2))->toBeNull();
+});
+
+test('getUserSets returns empty lists for a user cached with no permissions or roles', function () {
+    $this->repo->setUserPermissions(3, []);
+    $this->repo->setUserRoles(3, []);
+
+    expect($this->repo->getUserSets(3))->toBe(['permissions' => [], 'roles' => []]);
+});

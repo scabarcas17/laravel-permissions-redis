@@ -10,6 +10,7 @@ use InvalidArgumentException;
 use Scabarcas\LaravelPermissionsRedis\Concerns\LogsMessages;
 use Scabarcas\LaravelPermissionsRedis\Concerns\ResolvesUserModels;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
 use stdClass;
 
 class AuthorizationCacheManager
@@ -30,6 +31,7 @@ class AuthorizationCacheManager
         $this->warmAllRoles();
         $this->warmAllUsers();
         $this->warmPermissionGroups();
+        $this->forgetResolvedUsers();
 
         $this->log('Full authorization cache warm completed (flushed first).');
     }
@@ -40,6 +42,7 @@ class AuthorizationCacheManager
         $this->warmAllRoles();
         $this->warmAllUsers();
         $this->warmPermissionGroups();
+        $this->forgetResolvedUsers();
 
         $this->log('Cache rewarm completed (no flush).');
     }
@@ -73,6 +76,8 @@ class AuthorizationCacheManager
             "user:{$userId}:permissions" => $permissions,
             "user:{$userId}:roles"       => $roles,
         ]);
+
+        $this->forgetResolvedUser($userId);
     }
 
     public function warmRole(int $roleId): void
@@ -102,6 +107,8 @@ class AuthorizationCacheManager
     public function evictUser(int|string $userId): void
     {
         $this->repository->deleteUserCache($userId);
+
+        $this->forgetResolvedUser($userId);
     }
 
     public function evictRole(int $roleId): void
@@ -290,6 +297,33 @@ class AuthorizationCacheManager
 
             $this->repository->replaceSetBatch($batch);
         });
+    }
+
+    /**
+     * The resolver keeps what it read for a user for the rest of the process,
+     * so once this process rewrites or drops that user's sets the copy goes
+     * too. A resolver that was never built holds nothing to forget.
+     */
+    private function forgetResolvedUser(int|string $userId): void
+    {
+        if (!app()->resolved(PermissionResolverInterface::class)) {
+            return;
+        }
+
+        /** @var PermissionResolverInterface $resolver */
+        $resolver = app(PermissionResolverInterface::class);
+        $resolver->flushUser($userId);
+    }
+
+    private function forgetResolvedUsers(): void
+    {
+        if (!app()->resolved(PermissionResolverInterface::class)) {
+            return;
+        }
+
+        /** @var PermissionResolverInterface $resolver */
+        $resolver = app(PermissionResolverInterface::class);
+        $resolver->flush();
     }
 
     private function table(string $key): string

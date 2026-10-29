@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.0] - 2026-10-29
+
+Minor release: a request now costs one or two Redis round trips instead of
+two per distinct check, a change made in a process reaches the checks that
+process already answered, and the Octane reset needs no configuration. No
+breaking changes.
+
+### Added
+
+- **`Contracts\ReadsUserSets`.** An optional repository contract: `getUserSets($userId)` returns the user's permissions and roles together, or `null` when the user has no cache entry. The resolver uses it when the bound repository implements it, as `RedisPermissionRepository`, `TenantAwareRedisPermissionRepository` and `InMemoryPermissionRepository` now do, and keeps the separate reads otherwise, so a custom repository needs no change.
+
+### Changed
+
+- **The first check of a request reads both of the user's sets; the rest are answered in memory.** Every distinct permission or role check used to send an `EXISTS` and a `SISMEMBER`, so a request with 27 permission checks, 4 role checks, `getAllPermissions()` and `getRoleNames()` sent 67 Redis commands. It now sends 2: one `EVAL` that returns the permission and role sets together, and the `HMGET` for the permission groups; a request that doesn't call `getAllPermissions()` sends only the `EVAL`. Each command is a round trip, so the gap grows with the distance to Redis: with Redis 7 in Docker on macOS (about 0.15 ms per command) that request went from 10.1 ms to 0.43 ms at p50. A check looks its entry up in a hash of the user's set, so it stays O(1) whatever the set's size, and a request that makes a single check now reads both sets instead of one member, still in one round trip. A server that refuses scripts (an ACL without `@scripting`, some proxies) gets two `SMEMBERS` instead; the refusal is remembered until the next Octane request or queue job. Redis-suite tests pin the command count and run the fallback against an ACL user without scripting.
+- **Every check of a request or job is answered from the same read.** Before, a check the process had not made yet went to Redis and could see a change made elsewhere in the meantime. Octane requests and queue jobs start from a clean state on their own; a long-running process of your own (a daemon command, a custom worker loop) can call `app(PermissionResolverInterface::class)->flush()` between units of work.
+- **The Octane reset is automatic.** With answers kept for the process, an Octane worker without the reset would keep its first read of every user it served, permissions revoked by other workers included. The package now resets its in-memory state on every `RequestReceived` whenever Octane is installed, as it has done before every queue job since 4.1.2; the reset costs one Redis round trip per user a request checks. `octane.reset_on_request` (`PERMISSIONS_REDIS_OCTANE_RESET`) is ignored and will be removed in 5.0.
+
+### Fixed
+
+- **A process kept its old answers after changing a role or a permission itself.** Giving a role a permission, revoking one, deleting a role, renaming or deleting a permission, and calling `warmUser()` or `evictUser()` rewrote Redis but left the resolver's in-memory answers for the users involved. The same request, job or Octane worker kept answering from before the change, so a permission revoked from a role kept granting access until the process ended. `AuthorizationCacheManager::warmUser()`, `evictUser()`, `warmAll()` and `rewarmAll()` now also drop the resolver's copy of the users they rewrite, so every change the package makes to a user's sets reaches that process's next check.
+
+### Docs
+
+- README: the resolution flow, the comparison tables and the queue-worker note describe the new read path; the Octane section drops the setup step and says why the reset always runs; the troubleshooting list covers long-running processes of your own; the benchmark section shows the benchmark app's five strategies, with and without network latency. Migration guide: the cache store and in-memory caching sections, and the config table.
+
 ## [4.2.0] - 2026-10-29
 
 Minor release: opt-in morph map support, a queue section in the config, and
@@ -324,6 +349,7 @@ First stable release of `scabarcas/laravel-permissions-redis`.
 - **Test suite.** Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
 - **Documentation.** README with installation guide, usage examples, conventions, API reference, and C4 architecture diagrams.
 
+[4.3.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.2.0...v4.3.0
 [4.2.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.1.2...v4.2.0
 [4.1.2]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.1.0...v4.1.1

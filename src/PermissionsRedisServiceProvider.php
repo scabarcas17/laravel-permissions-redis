@@ -86,10 +86,7 @@ class PermissionsRedisServiceProvider extends ServiceProvider
             $this->registerWarmOnLogin();
         }
 
-        if (config('permissions-redis.octane.reset_on_request', false)) {
-            $this->registerOctaneReset();
-        }
-
+        $this->registerOctaneReset();
         $this->registerQueueReset();
     }
 
@@ -280,6 +277,13 @@ class PermissionsRedisServiceProvider extends ServiceProvider
         return static fn (): null => null;
     }
 
+    /**
+     * Octane keeps the container, and so the resolver singleton, alive
+     * across requests. The resolver answers from what it read for each user,
+     * so without a reset a worker would keep its first read of every user it
+     * served, permissions revoked by other workers included. Unconditional
+     * since 4.3.0; `octane.reset_on_request` is no longer read.
+     */
     private function registerOctaneReset(): void
     {
         $requestReceived = 'Laravel\Octane\Events\RequestReceived';
