@@ -39,6 +39,32 @@ trait ResolvesUserModels
         return $this->configuredUserModels()[0];
     }
 
+    /**
+     * The `model_type` values the pivot tables hold for the configured
+     * models: morph aliases under `use_morph_map`, class names otherwise.
+     *
+     * @return array<int, string>
+     */
+    private function configuredUserModelTypes(): array
+    {
+        return array_values(array_unique(array_map(
+            fn (string $model): string => $this->userModelType($model),
+            $this->configuredUserModels(),
+        )));
+    }
+
+    /**
+     * @param class-string<Model> $model
+     */
+    private function userModelType(string $model): string
+    {
+        if (!config('permissions-redis.use_morph_map', false)) {
+            return $model;
+        }
+
+        return (string) (new $model())->getMorphClass();
+    }
+
     private function isConfiguredUserModel(object $user): bool
     {
         foreach ($this->configuredUserModels() as $model) {

@@ -168,7 +168,25 @@ jobs:
 
   coverage:
     runs-on: ubuntu-latest
-    name: Coverage
+    strategy:
+      fail-fast: false
+      matrix:
+        client: [predis, phpredis]
+    name: Coverage (${{ matrix.client }})
+
+    # Without a server the Redis suite is skipped and the repository's
+    # coverage comes from mocks alone. One run per client, since the two
+    # clients take different branches; Codecov merges the uploads.
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v7
@@ -185,6 +203,10 @@ jobs:
 
       - name: Run tests with coverage
         run: vendor/bin/pest --coverage --min=80 --coverage-clover=build/logs/clover.xml
+        env:
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          PERMISSIONS_REDIS_TEST_CLIENT: ${{ matrix.client }}
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7

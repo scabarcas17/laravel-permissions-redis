@@ -12,6 +12,7 @@ use InvalidArgumentException;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsAssigned;
 use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
+use Scabarcas\LaravelPermissionsRedis\Events\UserDeleted;
 use Scabarcas\LaravelPermissionsRedis\Models\Permission;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
 
@@ -23,6 +24,45 @@ use Scabarcas\LaravelPermissionsRedis\Models\Role;
 trait HasRedisPermissions
 {
     private ?string $guardOverride = null;
+
+    /**
+     * A hard delete takes the user's role and permission rows with it, as
+     * Spatie does, and a soft delete keeps them for restore(). Either way
+     * UserDeleted is dispatched so Redis drops the user. Hooked on `deleted`
+     * rather than `deleting` so a delete that fails (a foreign key from
+     * another table, say) leaves the assignments untouched. Mass deletes
+     * (`User::query()->delete()`) fire no model events, as everywhere in
+     * Eloquent, and leave both the rows and the cache entry behind.
+     */
+    public static function bootHasRedisPermissions(): void
+    {
+        static::deleted(function (self $user): void {
+            $id = $user->getKey();
+
+            if (!is_int($id) && !is_string($id)) {
+                return;
+            }
+
+            $roleIds = [];
+
+            if (!method_exists($user, 'isForceDeleting') || $user->isForceDeleting() === true) {
+                // The role:{id}:users indexes are rebuilt from the pivot
+                // once the rows are gone, so the roles are read first.
+                foreach ($user->roles()->allRelatedIds() as $roleId) {
+                    if (is_numeric($roleId)) {
+                        $roleIds[] = (int) $roleId;
+                    }
+                }
+
+                $user->roles()->detach();
+                $user->permissions()->detach();
+            }
+
+            $user->getPermissionResolver()->flushUser($id);
+
+            event(new UserDeleted($id, $roleIds));
+        });
+    }
 
     public function forGuard(string $guard): static
     {
@@ -299,26 +339,30 @@ trait HasRedisPermissions
 
     public function roles(): BelongsToMany
     {
+        $modelType = $this->pivotModelType();
+
         return $this->belongsToMany(
             related: Role::class,
             table: config('permissions-redis.tables.model_has_roles', 'model_has_roles'),
             foreignPivotKey: 'model_id',
             relatedPivotKey: 'role_id',
         )
-            ->wherePivot('model_type', static::class)
-            ->withPivotValue('model_type', static::class);
+            ->wherePivot('model_type', $modelType)
+            ->withPivotValue('model_type', $modelType);
     }
 
     public function permissions(): BelongsToMany
     {
+        $modelType = $this->pivotModelType();
+
         return $this->belongsToMany(
             related: Permission::class,
             table: config('permissions-redis.tables.model_has_permissions', 'model_has_permissions'),
             foreignPivotKey: 'model_id',
             relatedPivotKey: 'permission_id',
         )
-            ->wherePivot('model_type', static::class)
-            ->withPivotValue('model_type', static::class);
+            ->wherePivot('model_type', $modelType)
+            ->withPivotValue('model_type', $modelType);
     }
 
     /**
@@ -389,6 +433,20 @@ trait HasRedisPermissions
     private function resolveRoleNameById(int $roleId): ?string
     {
         return Role::nameById($roleId);
+    }
+
+    /**
+     * What this model's pivot rows carry in `model_type`: the morph alias
+     * under `use_morph_map` (what Spatie writes), the class name otherwise.
+     * The cache warmer filters by the same value (ResolvesUserModels).
+     */
+    private function pivotModelType(): string
+    {
+        if (!config('permissions-redis.use_morph_map', false)) {
+            return static::class;
+        }
+
+        return (string) $this->getMorphClass();
     }
 
     private function consumeGuardOverride(): ?string

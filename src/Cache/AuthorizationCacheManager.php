@@ -112,7 +112,7 @@ class AuthorizationCacheManager
     /** @return array<int|string> */
     public function getUserIdsAffectedByPermission(int $permissionId): array
     {
-        $modelTypes = $this->configuredUserModels();
+        $modelTypes = $this->configuredUserModelTypes();
 
         $directUserIds = DB::table($this->table('model_has_permissions'))
             ->where('permission_id', $permissionId)
@@ -142,7 +142,7 @@ class AuthorizationCacheManager
         /** @var array<int|string> */
         return DB::table($this->table('model_has_roles'))
             ->where('role_id', $roleId)
-            ->whereIn('model_type', $this->configuredUserModels())
+            ->whereIn('model_type', $this->configuredUserModelTypes())
             ->pluck('model_id')
             ->all();
     }
@@ -176,7 +176,7 @@ class AuthorizationCacheManager
                     $this->table('role_has_permissions') . '.permission_id'
                 )
                 ->where($this->table('model_has_roles') . '.model_id', $userId)
-                ->whereIn($this->table('model_has_roles') . '.model_type', $this->configuredUserModels())
+                ->whereIn($this->table('model_has_roles') . '.model_type', $this->configuredUserModelTypes())
                 ->select($permissionsTable . '.guard_name', $permissionsTable . '.name')
                 ->cursor()
         );
@@ -196,7 +196,7 @@ class AuthorizationCacheManager
                     $this->table('model_has_permissions') . '.permission_id'
                 )
                 ->where($this->table('model_has_permissions') . '.model_id', $userId)
-                ->whereIn($this->table('model_has_permissions') . '.model_type', $this->configuredUserModels())
+                ->whereIn($this->table('model_has_permissions') . '.model_type', $this->configuredUserModelTypes())
                 ->select($permissionsTable . '.guard_name', $permissionsTable . '.name')
                 ->cursor()
         );
@@ -216,7 +216,7 @@ class AuthorizationCacheManager
                     $this->table('model_has_roles') . '.role_id'
                 )
                 ->where($this->table('model_has_roles') . '.model_id', $userId)
-                ->whereIn($this->table('model_has_roles') . '.model_type', $this->configuredUserModels())
+                ->whereIn($this->table('model_has_roles') . '.model_type', $this->configuredUserModelTypes())
                 ->select($rolesTable . '.guard_name', $rolesTable . '.name')
                 ->cursor()
         );
@@ -263,7 +263,7 @@ class AuthorizationCacheManager
 
     private function warmAllUsers(): void
     {
-        $modelTypes = $this->configuredUserModels();
+        $modelTypes = $this->configuredUserModelTypes();
 
         $userIds = DB::table($this->table('model_has_roles'))
             ->whereIn('model_type', $modelTypes)

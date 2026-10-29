@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.0] - 2026-10-29
+
+Minor release: opt-in morph map support, a queue section in the config, and
+user deletion that cleans up after itself. No breaking changes;
+`DispatchesPermissionEvents` is deprecated but keeps working.
+
+### Added
+
+- **`use_morph_map` config option.** With it on, the pivot tables store the user model's morph alias in `model_type` (`$user->getMorphClass()`, so `user` under `Relation::enforceMorphMap(['user' => User::class])`) instead of the class name, which is what `spatie/laravel-permission` writes. The relations, the query scopes, `Role::users()`, the cache warmer, the invalidation listener and the Spatie migration command all read and write the same value, so rows migrated from Spatie under a morph map are used as-is and the column matches the application's other polymorphic tables. Off (the default through 4.x), nothing changes: the class name is used even when a morph map exists. Turning it on for an installation that already has rows requires rewriting them once, since rows that still carry the class name are not read afterwards; the README has the one-off update. Under an enforced morph map every configured user model must be in the map, as with any morph relation. `php artisan about` reports the setting. The default becomes `true` in 5.0. Env: `PERMISSIONS_REDIS_USE_MORPH_MAP`.
+- **`queue.connection` / `queue.name` config.** The connection and queue for `WarmAllCacheJob` and `WarmUserCacheJob`, applied in the job constructor so jobs dispatched from application code honour them too; `--queue=connection` still overrides the connection for that run. `null` keeps the default queue connection and that connection's default queue. Env: `PERMISSIONS_REDIS_QUEUE_CONNECTION`, `PERMISSIONS_REDIS_QUEUE`. (The README documented these two keys between `4.0.0-beta.1` and `4.1.1` although they did not exist; if you added them to your published config back then, they take effect now.)
+- **`UserDeleted` carries `$affectedRoleIds`.** The roles the user held, captured before the pivot rows are removed. `CacheInvalidator::handleUserDeleted()` rebuilds those `role:{id}:users` indexes so the deleted user drops out of them instead of lingering until the TTL. Dispatching the event with the user ID alone, as before, still evicts the user cache.
+- **`permissions-redis:migrate-from-spatie` warns about `model_type` values it will not read.** After the summary (in dry runs too) the command lists each value found in Spatie's pivot tables that is not one of the configured user model types, with its row count, the types the package reads, and the hint to enable `use_morph_map` when the value is a morph alias. Previously such rows were copied in silence and every warm ignored them, which looked like a loss of permissions.
+
+### Fixed
+
+- **Deleting a user left its `model_has_roles` / `model_has_permissions` rows behind.** The pivots are polymorphic, so no foreign key removes them with the user, and nothing in the package did either. Besides the orphans, that is a hazard wherever IDs get reused (imports with fixed IDs, truncate-and-reseed): the next user with that ID inherited the roles. `HasRedisPermissions` now hooks `deleted`: a hard delete (`delete()` on a model without `SoftDeletes`, or `forceDelete()`) detaches both pivots, a soft delete keeps the rows for `restore()`, as Spatie does. Spatie detaches in `deleting`; doing it once the row is gone means a delete that fails (a foreign key from another table, for instance) leaves the assignments untouched. Either way `UserDeleted` is dispatched, the user's Redis entry evicted and the resolver's in-memory copy dropped, so `DispatchesPermissionEvents` is no longer needed for that. **If you dispatch `UserDeleted` yourself from a `deleted` hook, as an earlier README suggested, remove it: the trait does it now, and keeping both fires the event (and any listener of yours) twice.** Mass deletes through the query builder (`User::where(...)->delete()`) fire no model events, as everywhere in Eloquent, and leave rows and cache behind; the README shows the two ways around it.
+
+### Changed
+
+- **`DispatchesPermissionEvents` is deprecated.** It is a no-op on a model that also uses `HasRedisPermissions` (so models set up with both traits dispatch `UserDeleted` once, not twice) and still dispatches on models that use it alone. Removed in 5.0.
+- **The coverage job runs against Redis 7, once per client.** Without a server the Redis suite was skipped in that job, so the coverage of `RedisPermissionRepository` and the SCAN helper came from mocks alone. The two runs (predis, phpredis) upload separately and Codecov merges them.
+
+### Docs
+
+- README: `use_morph_map` and `queue.*` in the config table, a Morph Maps section with the upgrade rewrite, the queue section no longer claims there is no queue config, the invalidation and events tables describe what deletion does now, and the mass-delete caveat replaces the `DispatchesPermissionEvents` snippet.
+- Migration guide: with `use_morph_map` on, rows written by Spatie under a morph map need no rewrite; the FAQ keeps the rewrite as the alternative for those who prefer the class name.
+
 ## [4.1.2] - 2026-10-14
 
 Patch release: a 4.1.1 regression for predis on Laravel 11 / 12, Spatie-style
@@ -297,6 +324,7 @@ First stable release of `scabarcas/laravel-permissions-redis`.
 - **Test suite.** Unit and integration tests using Pest with `InMemoryPermissionRepository` fixture for testing without Redis.
 - **Documentation.** README with installation guide, usage examples, conventions, API reference, and C4 architecture diagrams.
 
+[4.2.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.1.2...v4.2.0
 [4.1.2]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.1.0...v4.1.1
 [4.1.0]: https://github.com/scabarcas17/laravel-permissions-redis/compare/v4.0.1...v4.1.0

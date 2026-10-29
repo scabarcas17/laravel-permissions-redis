@@ -52,3 +52,8 @@ test('UserDeleted holds user id', function () {
 
     expect($event->userId)->toBe(20);
 });
+
+test('UserDeleted carries the roles the user held and defaults to none', function () {
+    expect((new UserDeleted(20))->affectedRoleIds)->toBe([])
+        ->and((new UserDeleted(20, [1, 2]))->affectedRoleIds)->toBe([1, 2]);
+});

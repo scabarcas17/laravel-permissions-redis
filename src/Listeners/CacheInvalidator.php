@@ -109,11 +109,17 @@ class CacheInvalidator
         $this->log("Cache invalidation: user {$userId} deleted.");
 
         $this->repository->deleteUserCache($userId);
+
+        // The role:{id}:users indexes still list the user; its pivot rows
+        // are already gone, so rebuilding them from the database drops it.
+        foreach ($event->affectedRoleIds as $roleId) {
+            $this->cacheManager->warmRole($roleId);
+        }
     }
 
     private function rewarmUserRoleIndexes(int|string $userId): void
     {
-        $userModels = $this->configuredUserModels();
+        $userModels = $this->configuredUserModelTypes();
 
         /** @var string $table */
         $table = config('permissions-redis.tables.model_has_roles', 'model_has_roles');

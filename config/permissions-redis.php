@@ -207,6 +207,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Queue
+    |--------------------------------------------------------------------------
+    |
+    | Connection and queue for the jobs this package dispatches: the
+    | WarmAllCacheJob behind `permissions-redis:warm --queue` and the
+    | WarmUserCacheJob behind `permissions-redis:warm-user --queue`. Null
+    | means the default queue connection and that connection's default
+    | queue. `--queue=connection` still overrides the connection per run.
+    |
+    */
+
+    'queue' => [
+        'connection' => env('PERMISSIONS_REDIS_QUEUE_CONNECTION'),
+        'name'       => env('PERMISSIONS_REDIS_QUEUE'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Model Morph Key Type
     |--------------------------------------------------------------------------
     |
@@ -219,6 +237,27 @@ return [
     */
 
     'model_morph_key_type' => env('PERMISSIONS_REDIS_MORPH_KEY_TYPE', 'int'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Morph Map
+    |--------------------------------------------------------------------------
+    |
+    | What the pivot tables store in `model_type` for a user. When false,
+    | the class name (App\Models\User), even if the application defines a
+    | morph map. When true, the morph alias returned by $user->getMorphClass()
+    | ('user' under Relation::enforceMorphMap(['user' => User::class])): the
+    | value spatie/laravel-permission writes, so rows migrated from Spatie
+    | are read as-is and the column matches your other polymorphic tables.
+    | Every configured user model must then be in the map when the map is
+    | enforced, as with any morph relation.
+    |
+    | Turning it on for an installation that already has rows requires
+    | rewriting them once (see the README). The default becomes true in 5.0.
+    |
+    */
+
+    'use_morph_map' => (bool) env('PERMISSIONS_REDIS_USE_MORPH_MAP', false),
 
     /*
     |--------------------------------------------------------------------------

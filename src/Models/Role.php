@@ -104,14 +104,16 @@ class Role extends Model
 
     /**
      * Users holding this role. With several configured user models the
-     * relation targets the first one; the model_type filter keeps rows of
-     * the other models (which may share IDs) out of the result.
+     * relation targets the first one; the model_type filter (its class
+     * name, or its morph alias under `use_morph_map`) keeps rows of the
+     * other models (which may share IDs) out of the result.
      *
      * @return BelongsToMany<Model, $this>
      */
     public function users(): BelongsToMany
     {
         $userModel = $this->primaryUserModel();
+        $modelType = $this->userModelType($userModel);
 
         /** @var string $table */
         $table = config('permissions-redis.tables.model_has_roles', 'model_has_roles');
@@ -122,8 +124,8 @@ class Role extends Model
             foreignPivotKey: 'role_id',
             relatedPivotKey: 'model_id',
         )
-            ->wherePivot('model_type', $userModel)
-            ->withPivotValue('model_type', $userModel);
+            ->wherePivot('model_type', $modelType)
+            ->withPivotValue('model_type', $modelType);
     }
 
     /** @param string|int|array<string|int|Permission>|BackedEnum|Permission ...$permissions */
