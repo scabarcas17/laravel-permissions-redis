@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
@@ -281,4 +282,62 @@ test('migrate command copies pivot tables larger than one chunk with a determini
 
     // The sequence resync is PostgreSQL-only; nothing of the sort runs on SQLite.
     expect(array_filter($queries, fn (string $sql): bool => str_contains($sql, 'setval')))->toBeEmpty();
+});
+
+test('migrate command warns about model_type values it will not read and points at use_morph_map', function () {
+    config()->set('permission.table_names', [
+        'permissions'           => 'permissions',
+        'roles'                 => 'roles',
+        'model_has_permissions' => 'model_has_permissions',
+        'model_has_roles'       => 'model_has_roles',
+        'role_has_permissions'  => 'role_has_permissions',
+    ]);
+
+    $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+    $roleId = DB::table('roles')->insertGetId(['name' => 'admin', 'guard_name' => 'web']);
+    $permId = DB::table('permissions')->insertGetId(['name' => 'users.create', 'guard_name' => 'web']);
+
+    // What Spatie writes under Relation::enforceMorphMap(['user' => User::class]).
+    DB::table('model_has_roles')->insert([
+        'role_id' => $roleId, 'model_id' => $user->id, 'model_type' => 'user',
+    ]);
+    DB::table('model_has_permissions')->insert([
+        'permission_id' => $permId, 'model_id' => $user->id, 'model_type' => 'user',
+    ]);
+
+    $this->artisan('permissions-redis:migrate-from-spatie --dry-run')
+        ->expectsOutputToContain("2 assignment rows carry model_type 'user', which this package will not read.")
+        ->expectsOutputToContain('Configured user model types: ' . User::class . '.')
+        ->expectsOutputToContain('set use_morph_map to true')
+        ->assertSuccessful();
+});
+
+test('migrate command reads alias rows without a warning once use_morph_map matches the morph map', function () {
+    config()->set('permission.table_names', [
+        'permissions'           => 'permissions',
+        'roles'                 => 'roles',
+        'model_has_permissions' => 'model_has_permissions',
+        'model_has_roles'       => 'model_has_roles',
+        'role_has_permissions'  => 'role_has_permissions',
+    ]);
+    config()->set('permissions-redis.use_morph_map', true);
+    Relation::morphMap(['user' => User::class]);
+
+    try {
+        $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
+        $roleId = DB::table('roles')->insertGetId(['name' => 'admin', 'guard_name' => 'web']);
+        DB::table('model_has_roles')->insert([
+            'role_id' => $roleId, 'model_id' => $user->id, 'model_type' => 'user',
+        ]);
+
+        $this->artisan('permissions-redis:migrate-from-spatie')
+            ->doesntExpectOutputToContain('will not read')
+            ->expectsOutputToContain('Migration complete')
+            ->assertSuccessful();
+
+        expect($this->repo->getUserRoles($user->id))->toBe(['web|admin']);
+    } finally {
+        // Static on Relation; it would leak into the other test files.
+        Relation::morphMap([], false);
+    }
 });

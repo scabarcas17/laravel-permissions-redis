@@ -9,9 +9,12 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Concerns\ResolvesUserModels;
 
 class MigrateFromSpatieCommand extends Command
 {
+    use ResolvesUserModels;
+
     protected $signature = 'permissions-redis:migrate-from-spatie
         {--dry-run : Show what would be migrated without making changes}
         {--no-warm : Skip Redis cache warming after migration}';
@@ -71,6 +74,7 @@ class MigrateFromSpatieCommand extends Command
 
         $this->newLine();
         $this->printSummary();
+        $this->warnAboutUnreadModelTypes();
 
         if (!$this->dryRun && !$this->option('no-warm')) {
             $this->newLine();
@@ -364,5 +368,53 @@ class MigrateFromSpatieCommand extends Command
             ->count();
 
         $this->info("Summary: {$permissionsCount} permissions, {$rolesCount} roles, {$userIds} users with assignments.");
+    }
+
+    /**
+     * Assignment rows whose model_type is not one this package reads (under
+     * the current `user_model` / `use_morph_map` config) are copied and then
+     * ignored by every warm, which looks like a silent loss of permissions.
+     * Spatie writes the morph alias, so this is what a morph map looks like
+     * from here. Read from the Spatie tables so a dry run reports it too.
+     */
+    private function warnAboutUnreadModelTypes(): void
+    {
+        $readable = $this->configuredUserModelTypes();
+        $unread = [];
+
+        foreach (['model_has_roles', 'model_has_permissions'] as $key) {
+            $rows = DB::table($this->spatieTableNames[$key])
+                ->select('model_type', DB::raw('count(*) as aggregate'))
+                ->groupBy('model_type')
+                ->get();
+
+            foreach ($rows as $row) {
+                $type = is_string($row->model_type) ? $row->model_type : '';
+
+                if ($type === '' || in_array($type, $readable, true)) {
+                    continue;
+                }
+
+                $unread[$type] = ($unread[$type] ?? 0) + (is_numeric($row->aggregate) ? (int) $row->aggregate : 0);
+            }
+        }
+
+        if ($unread === []) {
+            return;
+        }
+
+        $this->newLine();
+
+        foreach ($unread as $type => $count) {
+            $this->warn("{$count} assignment rows carry model_type '{$type}', which this package will not read.");
+        }
+
+        $this->warn('Configured user model types: ' . implode(', ', $readable) . '.');
+
+        if (!config('permissions-redis.use_morph_map', false)) {
+            $this->warn('If that is a morph map alias, set use_morph_map to true (PERMISSIONS_REDIS_USE_MORPH_MAP=true) and run permissions-redis:warm.');
+        }
+
+        $this->warn('Otherwise add the model to user_model, or rewrite the column (docs/migration-from-spatie.md, "I use a morph map").');
     }
 }
