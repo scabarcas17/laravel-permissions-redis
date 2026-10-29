@@ -28,7 +28,7 @@ breaking changes.
 
 ### Docs
 
-- README: the resolution flow, the comparison tables and the queue-worker note describe the new read path; the Octane section drops the setup step and says why the reset always runs; the troubleshooting list covers long-running processes of your own. Migration guide: the cache store and in-memory caching sections, and the config table.
+- README: the resolution flow, the comparison tables and the queue-worker note describe the new read path; the Octane section drops the setup step and says why the reset always runs; the troubleshooting list covers long-running processes of your own; the benchmark section shows the benchmark app's five strategies, with and without network latency. Migration guide: the cache store and in-memory caching sections, and the config table.
 
 ## [4.2.0] - 2026-10-29
 
