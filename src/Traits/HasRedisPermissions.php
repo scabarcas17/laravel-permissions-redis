@@ -299,26 +299,30 @@ trait HasRedisPermissions
 
     public function roles(): BelongsToMany
     {
+        $modelType = $this->pivotModelType();
+
         return $this->belongsToMany(
             related: Role::class,
             table: config('permissions-redis.tables.model_has_roles', 'model_has_roles'),
             foreignPivotKey: 'model_id',
             relatedPivotKey: 'role_id',
         )
-            ->wherePivot('model_type', static::class)
-            ->withPivotValue('model_type', static::class);
+            ->wherePivot('model_type', $modelType)
+            ->withPivotValue('model_type', $modelType);
     }
 
     public function permissions(): BelongsToMany
     {
+        $modelType = $this->pivotModelType();
+
         return $this->belongsToMany(
             related: Permission::class,
             table: config('permissions-redis.tables.model_has_permissions', 'model_has_permissions'),
             foreignPivotKey: 'model_id',
             relatedPivotKey: 'permission_id',
         )
-            ->wherePivot('model_type', static::class)
-            ->withPivotValue('model_type', static::class);
+            ->wherePivot('model_type', $modelType)
+            ->withPivotValue('model_type', $modelType);
     }
 
     /**
@@ -389,6 +393,20 @@ trait HasRedisPermissions
     private function resolveRoleNameById(int $roleId): ?string
     {
         return Role::nameById($roleId);
+    }
+
+    /**
+     * What this model's pivot rows carry in `model_type`: the morph alias
+     * under `use_morph_map` (what Spatie writes), the class name otherwise.
+     * The cache warmer filters by the same value (ResolvesUserModels).
+     */
+    private function pivotModelType(): string
+    {
+        if (!config('permissions-redis.use_morph_map', false)) {
+            return static::class;
+        }
+
+        return (string) $this->getMorphClass();
     }
 
     private function consumeGuardOverride(): ?string

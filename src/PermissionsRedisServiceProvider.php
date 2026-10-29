@@ -147,6 +147,7 @@ class PermissionsRedisServiceProvider extends ServiceProvider
                 'Key Prefix'       => $this->configString('permissions-redis.prefix', 'auth:'),
                 'Cache TTL'        => sprintf('%d seconds', is_numeric($ttl) ? (int) $ttl : 86400),
                 'Tenancy'          => config('permissions-redis.tenancy.enabled') ? 'Enabled' : 'Disabled',
+                'Morph Map'        => config('permissions-redis.use_morph_map') ? 'Enabled' : 'Disabled',
                 'Wildcards'        => config('permissions-redis.wildcard_permissions') ? 'Enabled' : 'Disabled',
                 'Super Admin Role' => $this->configString('permissions-redis.super_admin_role', 'Disabled'),
             ];

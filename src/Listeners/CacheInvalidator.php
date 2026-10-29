@@ -113,7 +113,7 @@ class CacheInvalidator
 
     private function rewarmUserRoleIndexes(int|string $userId): void
     {
-        $userModels = $this->configuredUserModels();
+        $userModels = $this->configuredUserModelTypes();
 
         /** @var string $table */
         $table = config('permissions-redis.tables.model_has_roles', 'model_has_roles');
