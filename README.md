@@ -122,7 +122,7 @@ flowchart LR
     DB[("Database\nSource of truth:\npermissions, roles,\nassignments")]
 
     User -- "HTTP requests" --> App
-    App -- "Read: EXISTS, SMEMBERS\nWrite: warm / evict" --> Redis
+    App -- "Read: EVAL (both sets), HMGET\nWrite: warm / evict" --> Redis
     App -- "Read/Write:\nrole & permission\ndefinitions" --> DB
 ```
 
@@ -145,7 +145,7 @@ flowchart TB
         subgraph core ["Resolution & Cache"]
             direction LR
             Resolver["PermissionResolver\nIn-memory cache\nWildcard matching"]
-            Repo["RedisPermissionRepository\nSISMEMBER · SMEMBERS\nMULTI/EXEC atomicity"]
+            Repo["RedisPermissionRepository\nOne-trip reads (EVAL)\nMULTI/EXEC atomicity"]
         end
 
         subgraph sync ["Sync & Events"]
@@ -176,15 +176,16 @@ flowchart TB
 flowchart TD
     A["hasPermissionTo('posts.edit')"] --> B{In-memory\ncache?}
     B -- "Hit" --> C["Return cached result"]
-    B -- "Miss" --> D{"User's set read\nin this process?"}
+    B -- "Miss" --> D{"User's sets read\nin this process?"}
     D -- "Yes" --> E{"In the set?"}
-    D -- "No" --> F{"User cache\nexists in Redis?"}
-    F -- "Yes" --> G["SMEMBERS:\nread and keep the set"]
-    F -- "No (cold start)" --> H["AuthorizationCacheManager\n::warmUser()"]
+    D -- "No" --> F["One EVAL reads the\npermission and role sets"]
+    F --> G{"Entry in Redis?"}
+    G -- "Yes" --> P["Keep both sets\nfor the process"]
+    G -- "No (cold start)" --> H["AuthorizationCacheManager\n::warmUser()"]
     H --> I["Query DB:\ndirect perms + role perms"]
     I --> J["Write merged SETs\nto Redis"]
-    J --> G
-    G --> E
+    J --> F
+    P --> E
 
     E -- "Yes" --> N["Return true"]
     E -- "No" --> K{"Wildcard\nenabled?"}
@@ -195,7 +196,7 @@ flowchart TD
 
 ```
 
-The existence check and the read happen once per user and process: a request with 30 distinct checks sends one `EXISTS` and one `SMEMBERS` per set, not a Redis command per check.
+Both sets come back from one `EVAL` on the first check, so a request with 30 distinct checks sends one Redis command for them, not one per check. A server that refuses scripts (an ACL without `@scripting`, some proxies) gets two `SMEMBERS` instead.
 
 ### Cache Invalidation Flow
 
@@ -816,7 +817,7 @@ On every `RequestReceived` the package:
 2. Resets the `RedisPermissionRepository` cached connection, prefix, and TTL
 3. Clears the role id => name memo and the role rewarm cooldowns
 
-Redis stays warm, so a request pays a few Redis commands for each user it checks (one `EXISTS`, one `SMEMBERS` per set). Queue workers get the same reset before every job (see [Queue workers](#queue-workers)).
+Redis stays warm, so a request pays one Redis round trip for each user it checks (one `EVAL` for both sets). Queue workers get the same reset before every job (see [Queue workers](#queue-workers)).
 
 Up to 4.2.0 the reset was opt-in through `octane.reset_on_request` (`PERMISSIONS_REDIS_OCTANE_RESET`). The option is ignored since 4.3.0 and goes away in 5.0; you can delete it from your published config.
 
@@ -1428,7 +1429,7 @@ On **MySQL over TCP** (a realistic networked database; numbers are noisy across 
 | 10 requests | ~36 ms | ~36 ms | ~1.0x |
 | 50 requests | ~185 ms | ~140 ms | ~1.3x |
 
-> Each request exercises 27 `hasPermissionTo` calls, 4 `hasRole` calls, 4 batch ops, and 2 collection calls. On SQLite, avoiding 3 relation queries shows up as ~1.4x. On a networked database this package replaces those DB queries with several Redis reads (`SMEMBERS` / `HMGET`) over the same network, so latency lands close to Spatie plus cache and the edge is small and noisy (clear only on authorization-heavy requests). It was never the order of magnitude older numbers implied. The durable, hardware-independent difference is the query count above; the latency benefit is real but modest and database-dependent.
+> Each request exercises 27 `hasPermissionTo` calls, 4 `hasRole` calls, 4 batch ops, and 2 collection calls. On SQLite, avoiding 3 relation queries shows up as ~1.4x. On a networked database this package replaces those DB queries with Redis reads (one `EVAL` for both sets, plus an `HMGET` when the groups are needed) over the same network, so latency lands close to Spatie plus cache and the edge is small and noisy (clear only on authorization-heavy requests). It was never the order of magnitude older numbers implied. The durable, hardware-independent difference is the query count above; the latency benefit is real but modest and database-dependent.
 
 #### How the two approaches differ
 
@@ -1436,7 +1437,7 @@ On **MySQL over TCP** (a realistic networked database; numbers are noisy across 
 |--------|---------------------------|---------------------------|
 | **What's cached globally** | Permission/role registry (in the Cache store) | Same data, denormalized into per-user/per-role Redis SETs |
 | **Per-user resolution** | Lazy-loads the user's role/permission relations from the DB each request | Reads the resolved per-user set from Redis |
-| **Permission check** | In-memory check once the relations are loaded | One `SMEMBERS` per set on the first check, then in-memory for the rest of the request |
+| **Permission check** | In-memory check once the relations are loaded | Both sets read in one `EVAL` on the first check, then in-memory for the rest of the request |
 | **Invalidation** | `forgetCachedPermissions()` drops the whole registry cache | Surgical: rewarms only the affected user/role |
 | **After a change** | Next requests rebuild the registry from the DB | Other users' caches are untouched |
 

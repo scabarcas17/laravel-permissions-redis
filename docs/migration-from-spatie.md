@@ -366,7 +366,7 @@ $user->getDirectPermissions()->contains('name', 'reports.export');
 
 **Spatie** uses Laravel's Cache facade (configurable: file, database, Redis, etc.).
 
-**This package** uses Redis directly via `illuminate/redis` with custom SET data structures. Each user's roles and permissions are their own SETs, so a request reads only that user's entries (one `SMEMBERS` per set) instead of deserializing the whole cached registry, and answers its checks from memory.
+**This package** uses Redis directly via `illuminate/redis` with custom SET data structures. Each user's roles and permissions are their own SETs, so a request reads only that user's entries (both sets in one `EVAL`) instead of deserializing the whole cached registry, and answers its checks from memory.
 
 ### 5. In-memory caching
 

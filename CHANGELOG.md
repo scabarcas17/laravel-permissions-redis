@@ -7,16 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.3.0] - 2026-10-29
 
-Minor release: a request now costs a fixed handful of Redis round trips
-instead of two per distinct check, a change made in a process reaches the
-checks that process already answered, and the Octane reset needs no
-configuration. No API changes.
+Minor release: a request now costs one or two Redis round trips instead of
+two per distinct check, a change made in a process reaches the checks that
+process already answered, and the Octane reset needs no configuration. No
+breaking changes.
+
+### Added
+
+- **`Contracts\ReadsUserSets`.** An optional repository contract: `getUserSets($userId)` returns the user's permissions and roles together, or `null` when the user has no cache entry. The resolver uses it when the bound repository implements it, as `RedisPermissionRepository`, `TenantAwareRedisPermissionRepository` and `InMemoryPermissionRepository` now do, and keeps the separate reads otherwise, so a custom repository needs no change.
 
 ### Changed
 
-- **The first check of a request reads the user's set; the rest are answered in memory.** Every distinct permission or role check used to send an `EXISTS` and a `SISMEMBER`, so a request with 27 permission checks, 4 role checks, `getAllPermissions()` and `getRoleNames()` sent 67 Redis commands. It now sends 4: one `EXISTS` for the user, one `SMEMBERS` per set and the `HMGET` for the permission groups. Each command is a round trip, so the gap grows with the distance to Redis: with Redis 7 in Docker on macOS (about 0.15 ms per command) that request went from 10.1 ms to 0.73 ms at p50. A check looks its entry up in a hash of the user's set, so it stays O(1) whatever the set's size. A request that makes a single check now reads the whole set instead of one member, still in one round trip. A Redis-suite test pins the command count.
+- **The first check of a request reads both of the user's sets; the rest are answered in memory.** Every distinct permission or role check used to send an `EXISTS` and a `SISMEMBER`, so a request with 27 permission checks, 4 role checks, `getAllPermissions()` and `getRoleNames()` sent 67 Redis commands. It now sends 2: one `EVAL` that returns the permission and role sets together, and the `HMGET` for the permission groups; a request that doesn't call `getAllPermissions()` sends only the `EVAL`. Each command is a round trip, so the gap grows with the distance to Redis: with Redis 7 in Docker on macOS (about 0.15 ms per command) that request went from 10.1 ms to 0.43 ms at p50. A check looks its entry up in a hash of the user's set, so it stays O(1) whatever the set's size, and a request that makes a single check now reads both sets instead of one member, still in one round trip. A server that refuses scripts (an ACL without `@scripting`, some proxies) gets two `SMEMBERS` instead; the refusal is remembered until the next Octane request or queue job. Redis-suite tests pin the command count and run the fallback against an ACL user without scripting.
 - **Every check of a request or job is answered from the same read.** Before, a check the process had not made yet went to Redis and could see a change made elsewhere in the meantime. Octane requests and queue jobs start from a clean state on their own; a long-running process of your own (a daemon command, a custom worker loop) can call `app(PermissionResolverInterface::class)->flush()` between units of work.
-- **The Octane reset is automatic.** With answers kept for the process, an Octane worker without the reset would keep its first read of every user it served, permissions revoked by other workers included. The package now resets its in-memory state on every `RequestReceived` whenever Octane is installed, as it has done before every queue job since 4.1.2; the reset costs a few Redis commands per user a request checks. `octane.reset_on_request` (`PERMISSIONS_REDIS_OCTANE_RESET`) is ignored and will be removed in 5.0.
+- **The Octane reset is automatic.** With answers kept for the process, an Octane worker without the reset would keep its first read of every user it served, permissions revoked by other workers included. The package now resets its in-memory state on every `RequestReceived` whenever Octane is installed, as it has done before every queue job since 4.1.2; the reset costs one Redis round trip per user a request checks. `octane.reset_on_request` (`PERMISSIONS_REDIS_OCTANE_RESET`) is ignored and will be removed in 5.0.
 
 ### Fixed
 
