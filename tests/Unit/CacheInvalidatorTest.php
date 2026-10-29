@@ -93,3 +93,11 @@ test('handleUserDeleted removes user cache', function () {
 
     $this->invalidator->handleUserDeleted(new UserDeleted(15));
 });
+
+test('handleUserDeleted rebuilds the indexes of the roles the user held', function () {
+    $this->repository->shouldReceive('deleteUserCache')->with(15)->once();
+    $this->cacheManager->shouldReceive('warmRole')->with(3)->once();
+    $this->cacheManager->shouldReceive('warmRole')->with(4)->once();
+
+    $this->invalidator->handleUserDeleted(new UserDeleted(15, [3, 4]));
+});

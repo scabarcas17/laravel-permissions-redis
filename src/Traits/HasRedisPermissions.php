@@ -12,6 +12,7 @@ use InvalidArgumentException;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
 use Scabarcas\LaravelPermissionsRedis\Events\PermissionsAssigned;
 use Scabarcas\LaravelPermissionsRedis\Events\RolesAssigned;
+use Scabarcas\LaravelPermissionsRedis\Events\UserDeleted;
 use Scabarcas\LaravelPermissionsRedis\Models\Permission;
 use Scabarcas\LaravelPermissionsRedis\Models\Role;
 
@@ -23,6 +24,45 @@ use Scabarcas\LaravelPermissionsRedis\Models\Role;
 trait HasRedisPermissions
 {
     private ?string $guardOverride = null;
+
+    /**
+     * A hard delete takes the user's role and permission rows with it, as
+     * Spatie does, and a soft delete keeps them for restore(). Either way
+     * UserDeleted is dispatched so Redis drops the user. Hooked on `deleted`
+     * rather than `deleting` so a delete that fails (a foreign key from
+     * another table, say) leaves the assignments untouched. Mass deletes
+     * (`User::query()->delete()`) fire no model events, as everywhere in
+     * Eloquent, and leave both the rows and the cache entry behind.
+     */
+    public static function bootHasRedisPermissions(): void
+    {
+        static::deleted(function (self $user): void {
+            $id = $user->getKey();
+
+            if (!is_int($id) && !is_string($id)) {
+                return;
+            }
+
+            $roleIds = [];
+
+            if (!method_exists($user, 'isForceDeleting') || $user->isForceDeleting() === true) {
+                // The role:{id}:users indexes are rebuilt from the pivot
+                // once the rows are gone, so the roles are read first.
+                foreach ($user->roles()->allRelatedIds() as $roleId) {
+                    if (is_numeric($roleId)) {
+                        $roleIds[] = (int) $roleId;
+                    }
+                }
+
+                $user->roles()->detach();
+                $user->permissions()->detach();
+            }
+
+            $user->getPermissionResolver()->flushUser($id);
+
+            event(new UserDeleted($id, $roleIds));
+        });
+    }
 
     public function forGuard(string $guard): static
     {

@@ -8,9 +8,13 @@ use Illuminate\Database\Eloquent\Model;
 use Scabarcas\LaravelPermissionsRedis\Events\UserDeleted;
 
 /**
- * Auto-dispatches UserDeleted so the Redis cache is invalidated when
- * the consuming model is deleted. Add to your User model alongside
- * HasRedisPermissions.
+ * Dispatches UserDeleted when the consuming model is deleted so the Redis
+ * cache is invalidated.
+ *
+ * @deprecated since 4.2.0: HasRedisPermissions dispatches UserDeleted itself
+ *             (and removes the pivot rows on a hard delete). The trait stays
+ *             a no-op on models that also use HasRedisPermissions, so adding
+ *             both keeps working; it will be removed in 5.0.
  *
  * @mixin Model
  */
@@ -18,6 +22,10 @@ trait DispatchesPermissionEvents
 {
     public static function bootDispatchesPermissionEvents(): void
     {
+        if (in_array(HasRedisPermissions::class, class_uses_recursive(static::class), true)) {
+            return;
+        }
+
         static::deleted(function (Model $model): void {
             $id = $model->getKey();
 
