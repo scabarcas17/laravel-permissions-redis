@@ -7,8 +7,9 @@ namespace Scabarcas\LaravelPermissionsRedis\Cache;
 use Closure;
 use Illuminate\Support\Facades\Redis;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Contracts\ReadsUserSets;
 
-class TenantAwareRedisPermissionRepository implements PermissionRepositoryInterface
+class TenantAwareRedisPermissionRepository implements PermissionRepositoryInterface, ReadsUserSets
 {
     use ScansRedisByPrefix;
 
@@ -80,6 +81,27 @@ class TenantAwareRedisPermissionRepository implements PermissionRepositoryInterf
     public function setRoleUsers(int|string $roleId, array $userIds): void
     {
         $this->inner->setRoleUsers($this->tenantKey($roleId), $userIds);
+    }
+
+    /**
+     * @return array{permissions: array<string>, roles: array<string>}|null
+     */
+    public function getUserSets(int|string $userId): ?array
+    {
+        $key = $this->tenantKey($userId);
+
+        if ($this->inner instanceof ReadsUserSets) {
+            return $this->inner->getUserSets($key);
+        }
+
+        if (!$this->inner->userCacheExists($key)) {
+            return null;
+        }
+
+        return [
+            'permissions' => $this->inner->getUserPermissions($key),
+            'roles'       => $this->inner->getUserRoles($key),
+        ];
     }
 
     public function userCacheExists(int|string $userId): bool

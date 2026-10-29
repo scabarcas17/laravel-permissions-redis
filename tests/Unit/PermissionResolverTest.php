@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Contracts\ReadsUserSets;
 use Scabarcas\LaravelPermissionsRedis\DTO\PermissionDTO;
 use Scabarcas\LaravelPermissionsRedis\Resolver\PermissionResolver;
 
@@ -616,4 +617,52 @@ test('warm cooldown timestamps are evicted like the other per-user caches', func
     expect(count($attempts))->toBeLessThanOrEqual(3)
         ->and(array_key_exists(5, $attempts))->toBeTrue()
         ->and(array_key_exists(1, $attempts))->toBeFalse();
+});
+
+// ─── repositories that read both sets at once ───
+
+test('a repository that reads both sets together answers every check from one read', function () {
+    $repository = Mockery::mock(PermissionRepositoryInterface::class, ReadsUserSets::class);
+    $resolver = new PermissionResolver($repository, $this->cacheManager);
+
+    $repository->shouldReceive('getUserSets')->with(1)->once()->andReturn([
+        'permissions' => ['web|posts.edit'],
+        'roles'       => ['web|editor'],
+    ]);
+
+    expect($resolver->hasPermission(1, 'posts.edit'))->toBeTrue()
+        ->and($resolver->hasPermission(1, 'posts.view'))->toBeFalse()
+        ->and($resolver->hasRole(1, 'editor'))->toBeTrue()
+        ->and($resolver->hasRole(1, 'admin'))->toBeFalse()
+        ->and($resolver->getAllRoles(1)->all())->toBe(['editor']);
+});
+
+test('a missing entry is warmed and read again through the combined read', function () {
+    $repository = Mockery::mock(PermissionRepositoryInterface::class, ReadsUserSets::class);
+    $resolver = new PermissionResolver($repository, $this->cacheManager);
+
+    $repository->shouldReceive('getUserSets')->with(1)->twice()->andReturn(null, [
+        'permissions' => ['web|posts.edit'],
+        'roles'       => [],
+    ]);
+    $this->cacheManager->shouldReceive('warmUser')->with(1)->once();
+
+    expect($resolver->hasPermission(1, 'posts.edit'))->toBeTrue();
+});
+
+test('a missing entry inside the warm cooldown is not kept by the combined read', function () {
+    config()->set('permissions-redis.resolver_warm_cooldown', 5.0);
+
+    $repository = Mockery::mock(PermissionRepositoryInterface::class, ReadsUserSets::class);
+    $resolver = new PermissionResolver($repository, $this->cacheManager);
+
+    // Missing around the warm, then written by another process.
+    $repository->shouldReceive('getUserSets')->with(1)->times(3)->andReturn(null, null, [
+        'permissions' => ['web|posts.edit'],
+        'roles'       => [],
+    ]);
+    $this->cacheManager->shouldReceive('warmUser')->with(1)->once();
+
+    expect($resolver->hasPermission(1, 'posts.edit'))->toBeFalse()
+        ->and($resolver->hasPermission(1, 'posts.edit'))->toBeTrue();
 });

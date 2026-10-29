@@ -255,3 +255,16 @@ test('deletePermissionGroup removes group from all tenants', function () {
     expect($tenant1Repo->getPermissionGroups(['web|users.create']))
         ->toBe(['web|users.create' => null]);
 });
+
+test('getUserSets reads the current tenant entry', function () {
+    $inner = new InMemoryPermissionRepository();
+
+    $tenant1Repo = createTenantRepo($inner, 'tenant-1');
+    $tenant2Repo = createTenantRepo($inner, 'tenant-2');
+
+    $tenant1Repo->setUserPermissions(1, ['web|posts.create']);
+    $tenant1Repo->setUserRoles(1, ['web|editor']);
+
+    expect($tenant1Repo->getUserSets(1))->toBe(['permissions' => ['web|posts.create'], 'roles' => ['web|editor']])
+        ->and($tenant2Repo->getUserSets(1))->toBeNull();
+});

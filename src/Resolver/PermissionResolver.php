@@ -9,6 +9,7 @@ use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
 use Scabarcas\LaravelPermissionsRedis\Concerns\LogsMessages;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
+use Scabarcas\LaravelPermissionsRedis\Contracts\ReadsUserSets;
 use Scabarcas\LaravelPermissionsRedis\DTO\PermissionDTO;
 use Throwable;
 
@@ -61,9 +62,9 @@ class PermissionResolver implements PermissionResolverInterface
             return $this->permissionCache[$userId][$cacheKey];
         }
 
-        // The first check reads the user's whole set (one SMEMBERS) and the
-        // later ones look it up in memory, rather than one SISMEMBER round
-        // trip per distinct check.
+        // The first check reads the user's sets and the later ones look them
+        // up in memory, rather than one SISMEMBER round trip per distinct
+        // check.
         $permissions = $this->loadUserPermissions($userId);
 
         $result = isset($permissions[$cacheKey]);
@@ -218,7 +219,10 @@ class PermissionResolver implements PermissionResolverInterface
             return true;
         }
 
-        if (!$this->repository->userCacheExists($userId) && !$this->warmMissingUser($userId)) {
+        $exists = $this->repository->userCacheExists($userId)
+            || ($this->warmMissingUser($userId) && $this->repository->userCacheExists($userId));
+
+        if (!$exists) {
             return false;
         }
 
@@ -227,6 +231,10 @@ class PermissionResolver implements PermissionResolverInterface
         return true;
     }
 
+    /**
+     * Warms a user whose Redis entry is missing; false, without warming,
+     * inside the warm cooldown.
+     */
     private function warmMissingUser(int|string $userId): bool
     {
         $cooldown = $this->warmCooldownSeconds();
@@ -249,7 +257,7 @@ class PermissionResolver implements PermissionResolverInterface
             $this->warmAttempts[$userId] = microtime(true);
         }
 
-        return $this->repository->userCacheExists($userId);
+        return true;
     }
 
     private function warmCooldownSeconds(): float
@@ -351,6 +359,10 @@ class PermissionResolver implements PermissionResolverInterface
             return $this->allPermissionsCache[$userId];
         }
 
+        if ($this->repository instanceof ReadsUserSets) {
+            return $this->loadUserSets($this->repository, $userId)['permissions'] ?? [];
+        }
+
         if (!$this->ensureUserCacheExists($userId)) {
             // Missing and cooling down: nothing to read, and nothing kept,
             // so a later call looks again.
@@ -372,6 +384,10 @@ class PermissionResolver implements PermissionResolverInterface
             return $this->allRolesCache[$userId];
         }
 
+        if ($this->repository instanceof ReadsUserSets) {
+            return $this->loadUserSets($this->repository, $userId)['roles'] ?? [];
+        }
+
         if (!$this->ensureUserCacheExists($userId)) {
             return [];
         }
@@ -382,6 +398,37 @@ class PermissionResolver implements PermissionResolverInterface
         $this->evictIfNeeded();
 
         return $roles;
+    }
+
+    /**
+     * Both of the user's sets in one read, kept for the process. Null when
+     * the entry is missing and the warm cooldown holds off another warm;
+     * nothing is kept then, so a later call reads again.
+     *
+     * @return array{permissions: array<array-key, true>, roles: array<array-key, true>}|null
+     */
+    private function loadUserSets(ReadsUserSets $repository, int|string $userId): ?array
+    {
+        $sets = $repository->getUserSets($userId);
+
+        if ($sets === null && $this->warmMissingUser($userId)) {
+            $sets = $repository->getUserSets($userId);
+        }
+
+        if ($sets === null) {
+            return null;
+        }
+
+        $loaded = [
+            'permissions' => array_fill_keys($sets['permissions'], true),
+            'roles'       => array_fill_keys($sets['roles'], true),
+        ];
+
+        $this->allPermissionsCache[$userId] = $loaded['permissions'];
+        $this->allRolesCache[$userId] = $loaded['roles'];
+        $this->evictIfNeeded();
+
+        return $loaded;
     }
 
     /**

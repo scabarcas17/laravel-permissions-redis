@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Redis\Events\CommandExecuted;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Redis;
+use Scabarcas\LaravelPermissionsRedis\Cache\RedisPermissionRepository;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
 
@@ -14,7 +15,7 @@ use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface;
 // checks, 4 role checks, getAllPermissions() and getRoleNames(). 4.2.0 sent
 // 67 commands for it: an EXISTS and a SISMEMBER per distinct check.
 
-test('a check-heavy request sends one EXISTS, one SMEMBERS per set and one HMGET', function () {
+test('a check-heavy request sends one EVAL for both sets and one HMGET', function () {
     $permissions = [
         'users.view', 'users.create', 'users.edit', 'users.delete',
         'posts.view', 'posts.create', 'posts.edit', 'posts.delete',
@@ -49,5 +50,54 @@ test('a check-heavy request sends one EXISTS, one SMEMBERS per set and one HMGET
     $resolver->getAllPermissions(1);
     $resolver->getAllRoles(1);
 
-    expect(array_count_values($commands))->toEqual(['exists' => 1, 'smembers' => 2, 'hmget' => 1]);
+    expect(array_count_values($commands))->toEqual(['eval' => 1, 'hmget' => 1]);
+});
+
+test('a server that refuses scripts gets the two sets with two SMEMBERS', function () {
+    // An ACL user without @scripting: the server answers EVAL with NOPERM.
+    $admin = Redis::connection('default');
+    $admin->command('acl', ['setuser', 'lpr_noscript', 'on', '>noscript', '~*', '+@all', '-@scripting']);
+
+    try {
+        config()->set('database.redis.noscript', array_merge(
+            (array) config('database.redis.default'),
+            ['username' => 'lpr_noscript', 'password' => 'noscript'],
+        ));
+        config()->set('permissions-redis.redis_connection', 'noscript');
+
+        // The manager reads its config once; a fresh one sees the new connection.
+        app()->forgetInstance('redis');
+        Redis::clearResolvedInstance('redis');
+
+        $repository = new RedisPermissionRepository();
+        $repository->setUserPermissions(1, ['web|posts.edit']);
+        $repository->setUserRoles(1, ['web|editor']);
+
+        $commands = [];
+        $count = function (object $event) use (&$commands): void {
+            /** @var CommandExecuted $event */
+            $commands[] = strtolower($event->command);
+        };
+
+        Redis::connection('noscript')->setEventDispatcher(app('events'));
+        Event::listen(CommandExecuted::class, $count);
+
+        // The refused EVAL is a CommandFailed under predis (it throws) where
+        // the framework has that event, a CommandExecuted under phpredis
+        // (it answers false).
+        if (class_exists('Illuminate\\Redis\\Events\\CommandFailed')) {
+            Event::listen('Illuminate\\Redis\\Events\\CommandFailed', $count);
+        }
+
+        expect($repository->getUserSets(1))->toBe(['permissions' => ['web|posts.edit'], 'roles' => ['web|editor']])
+            ->and($repository->getUserSets(2))->toBeNull();
+
+        $counts = array_count_values($commands);
+
+        // Two SMEMBERS for each read, and EVAL is not asked again once refused.
+        expect($counts['smembers'] ?? 0)->toBe(4)
+            ->and($counts['eval'] ?? 0)->toBeLessThanOrEqual(1);
+    } finally {
+        $admin->command('acl', ['deluser', 'lpr_noscript']);
+    }
 });

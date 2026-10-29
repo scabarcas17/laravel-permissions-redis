@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Scabarcas\LaravelPermissionsRedis\Testing;
 
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Contracts\ReadsUserSets;
 
 /**
  * Array-backed PermissionRepositoryInterface implementation. Bind it in a
  * test suite to run permission checks without a Redis server.
  */
-class InMemoryPermissionRepository implements PermissionRepositoryInterface
+class InMemoryPermissionRepository implements PermissionRepositoryInterface, ReadsUserSets
 {
     /** @var array<int|string, array<string>> */
     private array $userPermissions = [];
@@ -82,6 +83,21 @@ class InMemoryPermissionRepository implements PermissionRepositoryInterface
     public function setRoleUsers(int|string $roleId, array $userIds): void
     {
         $this->roleUsers[$roleId] = $userIds;
+    }
+
+    /**
+     * @return array{permissions: array<string>, roles: array<string>}|null
+     */
+    public function getUserSets(int|string $userId): ?array
+    {
+        if (!isset($this->userPermissions[$userId])) {
+            return null;
+        }
+
+        return [
+            'permissions' => $this->userPermissions[$userId],
+            'roles'       => $this->userRoles[$userId] ?? [],
+        ];
     }
 
     public function userCacheExists(int|string $userId): bool

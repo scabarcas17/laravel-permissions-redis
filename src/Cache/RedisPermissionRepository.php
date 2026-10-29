@@ -6,11 +6,13 @@ namespace Scabarcas\LaravelPermissionsRedis\Cache;
 
 use Illuminate\Redis\Connections\Connection;
 use Illuminate\Support\Facades\Redis;
+use Redis as PhpRedis;
 use Scabarcas\LaravelPermissionsRedis\Contracts\PermissionRepositoryInterface;
+use Scabarcas\LaravelPermissionsRedis\Contracts\ReadsUserSets;
 use Scabarcas\LaravelPermissionsRedis\Exceptions\TransactionFailedException;
 use Throwable;
 
-class RedisPermissionRepository implements PermissionRepositoryInterface
+class RedisPermissionRepository implements PermissionRepositoryInterface, ReadsUserSets
 {
     use ScansRedisByPrefix;
 
@@ -20,6 +22,14 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
      * collisions with real permission/role names effectively impossible.
      */
     public const EMPTY_SENTINEL = "\0__lpr_empty__\0";
+
+    /**
+     * Both of a user's sets in one command. SMEMBERS of a missing key is an
+     * empty list, and a warmed set always holds at least the sentinel.
+     */
+    private const READ_USER_SETS_SCRIPT = "return {redis.call('SMEMBERS', KEYS[1]), redis.call('SMEMBERS', KEYS[2])}";
+
+    private bool $scriptsUnavailable = false;
 
     private ?Connection $cachedConnection = null;
 
@@ -35,6 +45,7 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         $this->cachedConnection = null;
         $this->cachedPrefix = null;
         $this->cachedTtl = null;
+        $this->scriptsUnavailable = false;
     }
 
     /**
@@ -360,6 +371,27 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
     }
 
     /**
+     * @throws Throwable
+     *
+     * @return array{permissions: array<string>, roles: array<string>}|null
+     */
+    public function getUserSets(int|string $userId): ?array
+    {
+        [$permissions, $roles] = $this->readUserSetMembers($userId);
+
+        // A warmed permissions set is never empty (the sentinel stands in for
+        // "no permissions"), so an empty one means the entry is missing.
+        if ($permissions === []) {
+            return null;
+        }
+
+        return [
+            'permissions' => $this->withoutSentinel($permissions),
+            'roles'       => $this->withoutSentinel($roles),
+        ];
+    }
+
+    /**
      * @param array<string, string> $pairs
      *
      * @return array<int, string>
@@ -400,6 +432,65 @@ class RedisPermissionRepository implements PermissionRepositoryInterface
         if (!is_array($result)) {
             throw TransactionFailedException::forKey($key);
         }
+    }
+
+    /**
+     * One EVAL when the server runs scripts, two SMEMBERS when it refuses
+     * them (an ACL without @scripting, some proxies). A refusal is kept until
+     * resetState(), which Octane and queue workers call per request and job.
+     *
+     * @throws Throwable
+     *
+     * @return array{0: array<string>, 1: array<string>}
+     */
+    private function readUserSetMembers(int|string $userId): array
+    {
+        $connection = $this->connection();
+        $permissionsKey = $this->userPermissionsKey($userId);
+        $rolesKey = $this->userRolesKey($userId);
+
+        if (!$this->scriptsUnavailable) {
+            // phpredis takes (script, keys, key count); predis (script, key count, ...keys).
+            $arguments = class_exists(PhpRedis::class) && $connection->client() instanceof PhpRedis
+                ? [self::READ_USER_SETS_SCRIPT, [$permissionsKey, $rolesKey], 2]
+                : [self::READ_USER_SETS_SCRIPT, 2, $permissionsKey, $rolesKey];
+
+            try {
+                // phpredis answers a refused script with false, predis throws.
+                $result = $connection->command('eval', $arguments);
+            } catch (Throwable) {
+                $result = null;
+            }
+
+            if (is_array($result) && is_array($result[0] ?? null) && is_array($result[1] ?? null)) {
+                return [$this->stringMembers($result[0]), $this->stringMembers($result[1])];
+            }
+
+            $this->scriptsUnavailable = true;
+        }
+
+        return [
+            $this->stringMembers($connection->command('smembers', [$permissionsKey])),
+            $this->stringMembers($connection->command('smembers', [$rolesKey])),
+        ];
+    }
+
+    /**
+     * @return array<string>
+     */
+    private function stringMembers(mixed $members): array
+    {
+        return is_array($members) ? array_values(array_filter($members, is_string(...))) : [];
+    }
+
+    /**
+     * @param array<string> $members
+     *
+     * @return array<string>
+     */
+    private function withoutSentinel(array $members): array
+    {
+        return array_values(array_filter($members, fn (string $m): bool => $m !== self::EMPTY_SENTINEL));
     }
 
     private function userPermissionsKey(int|string $userId): string
