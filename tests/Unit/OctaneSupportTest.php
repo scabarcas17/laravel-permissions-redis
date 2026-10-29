@@ -143,14 +143,17 @@ test('different users do not share cached data after flush', function () {
     expect($resolver->hasPermission(2, 'admin.panel'))->toBeFalse();
 });
 
-test('Octane RequestReceived listener flushes resolver, repository state, and role cache', function () {
-    config()->set('permissions-redis.octane.reset_on_request', true);
+test('Octane RequestReceived flushes resolver, repository state, and role cache with no config', function () {
+    // Ignored since 4.3.0: the reset runs whatever the option says.
+    config()->set('permissions-redis.octane.reset_on_request', false);
 
+    // At least once: an app booted after another test defined the event class
+    // has registered the listener already, and the boot below adds another.
     $resolver = Mockery::mock(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class);
-    $resolver->shouldReceive('flush')->once();
+    $resolver->shouldReceive('flush')->atLeast()->once();
 
     $repo = Mockery::mock(RedisPermissionRepository::class);
-    $repo->shouldReceive('resetState')->once();
+    $repo->shouldReceive('resetState')->atLeast()->once();
 
     $this->app->instance(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class, $resolver);
     $this->app->instance(RedisPermissionRepository::class, $repo);
@@ -169,6 +172,32 @@ test('Octane RequestReceived listener flushes resolver, repository state, and ro
     event(new $requestReceivedClass());
 
     expect($cacheProp->getValue())->toBe([]);
+});
+
+test('RequestReceived resets the in-memory state so a worker does not keep an earlier read', function () {
+    $repo = new \Scabarcas\LaravelPermissionsRedis\Testing\InMemoryPermissionRepository();
+    $this->app->instance(PermissionRepositoryInterface::class, $repo);
+    $this->app->forgetInstance(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class);
+
+    $requestReceivedClass = 'Laravel\\Octane\\Events\\RequestReceived';
+
+    if (!class_exists($requestReceivedClass)) {
+        eval('namespace Laravel\\Octane\\Events; class RequestReceived {}');
+    }
+
+    (new \Scabarcas\LaravelPermissionsRedis\PermissionsRedisServiceProvider($this->app))->boot();
+
+    $resolver = $this->app->make(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class);
+
+    $repo->setUserPermissions(1, ['web|posts.edit']);
+    expect($resolver->hasPermission(1, 'posts.edit', 'web'))->toBeTrue();
+
+    // Another worker revokes the permission and rewarms Redis.
+    $repo->setUserPermissions(1, []);
+
+    event(new $requestReceivedClass());
+
+    expect($resolver->hasPermission(1, 'posts.edit', 'web'))->toBeFalse();
 });
 
 // ─── Queue workers ───
