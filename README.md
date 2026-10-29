@@ -20,6 +20,7 @@ Inspired by [spatie/laravel-permission](https://github.com/spatie/laravel-permis
 [![Laravel 11|12|13](https://img.shields.io/badge/Laravel-11%20%7C%2012%20%7C%2013-red.svg)](https://laravel.com)
 [![PHPStan Level Max](https://img.shields.io/badge/PHPStan-level%20max-brightgreen.svg)](https://phpstan.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/scabarcas17/badge.svg)](https://hub.xerj.org/contributors/scabarcas17)
 
 ---
 
