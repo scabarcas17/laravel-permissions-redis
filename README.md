@@ -310,7 +310,9 @@ All options live in `config/permissions-redis.php`:
 | `resolver_warm_cooldown` | `PERMISSIONS_REDIS_RESOLVER_WARM_COOLDOWN` | `1.0` | Seconds before a failed cache-miss warm is retried for the same user |
 | `tenancy.enabled` / `tenancy.resolver` | `PERMISSIONS_REDIS_TENANCY_ENABLED` / `PERMISSIONS_REDIS_TENANCY_RESOLVER` | `false` / `null` | Per-tenant key isolation, see [Multi-Tenancy](#multi-tenancy) |
 | `octane.reset_on_request` | `PERMISSIONS_REDIS_OCTANE_RESET` | `false` | Reset in-memory state per Octane request, see [Laravel Octane](#laravel-octane) |
+| `queue.connection` / `queue.name` | `PERMISSIONS_REDIS_QUEUE_CONNECTION` / `PERMISSIONS_REDIS_QUEUE` | `null` / `null` | Connection and queue for the warm jobs (`null` = defaults), see [Artisan Commands](#artisan-commands) |
 | `model_morph_key_type` | `PERMISSIONS_REDIS_MORPH_KEY_TYPE` | `'int'` | `model_id` column type: `int`, `uuid` or `ulid` |
+| `use_morph_map` | `PERMISSIONS_REDIS_USE_MORPH_MAP` | `false` | Store the morph alias instead of the class name in `model_type`, see [Morph Maps](#morph-maps) |
 | `seed` | *(none)* | *(see config)* | Roles and permissions to seed via CLI |
 | `tables` | *(none)* | *(see config)* | Custom table names |
 
@@ -349,6 +351,31 @@ If your application authorizes more than one Eloquent model (e.g., `User` for th
 ```
 
 `AuthorizationCacheManager` iterates all configured types when resolving role/permission assignments, and the `Gate::before` callback accepts all of them. Each model still needs the `HasRedisPermissions` trait.
+
+#### Morph Maps
+
+By default the pivot tables store the user model's class name in `model_type`, whether or not the application defines a morph map. Set `use_morph_map` to `true` to store the morph alias instead (`$user->getMorphClass()`, so `user` under `Relation::enforceMorphMap(['user' => User::class])`). That is the value `spatie/laravel-permission` writes, so rows migrated from Spatie are read without a rewrite, and the column matches the rest of your polymorphic tables. Under an enforced morph map every configured user model must be in the map, as with any morph relation.
+
+```php
+// config/permissions-redis.php
+'use_morph_map' => true,
+```
+
+Fresh installs can turn it on from the start. An installation that already has rows written with the class name has to rewrite them once, because rows that still carry the class name are not read once the option is on. Then warm the cache:
+
+```php
+use App\Models\User;
+use Illuminate\Support\Facades\DB;
+
+DB::table('model_has_roles')->where('model_type', User::class)->update(['model_type' => 'user']);
+DB::table('model_has_permissions')->where('model_type', User::class)->update(['model_type' => 'user']);
+```
+
+```bash
+php artisan permissions-redis:warm
+```
+
+The default stays `false` through 4.x and becomes `true` in 5.0.
 
 ### Creating Roles and Permissions
 
@@ -650,7 +677,7 @@ php artisan permissions-redis:flush --force
 php artisan permissions-redis:stats
 ```
 
-The package also registers a section in `php artisan about` with the installed version, Redis connection, key prefix, TTL, and whether tenancy, wildcards, and the super admin role are enabled.
+The package also registers a section in `php artisan about` with the installed version, Redis connection, key prefix, TTL, and whether tenancy, the morph map option, wildcards, and the super admin role are enabled.
 
 Both warm commands accept `--queue` to push the operation onto the queue instead of running it synchronously. This is the recommended approach for large user tables or post-deploy rewarms:
 
@@ -665,7 +692,7 @@ php artisan permissions-redis:warm --queue=redis --no-flush
 php artisan permissions-redis:warm-user 42 --queue
 ```
 
-`permissions-redis:warm --queue` dispatches a single `WarmAllCacheJob` (flush + warm, or an incremental rewarm with `--no-flush`); `warm-user --queue` dispatches a `WarmUserCacheJob`. Both are idempotent and safe to retry. There is no queue section in the config file: the connection comes from the option value and the queue name is the connection's default.
+`permissions-redis:warm --queue` dispatches a single `WarmAllCacheJob` (flush + warm, or an incremental rewarm with `--no-flush`); `warm-user --queue` dispatches a `WarmUserCacheJob`. Both are idempotent and safe to retry. The `queue.connection` and `queue.name` config entries (`PERMISSIONS_REDIS_QUEUE_CONNECTION` / `PERMISSIONS_REDIS_QUEUE`) set the connection and queue for both jobs, including ones you dispatch from your own code; `--queue=connection` overrides the connection for that run. Left `null`, jobs go to the default queue connection and that connection's default queue.
 
 #### Queue workers
 
@@ -701,19 +728,11 @@ The cache is automatically invalidated when:
 | `RoleDeleted` | `Role::delete()` | Evict role + rewarm affected users |
 | *(model hook)* | `Role::save()` with a changed `name` or `guard_name` | Rewarm all users with that role |
 | *(model hook)* | `Permission::save()` or `Permission::delete()` | Rewarm affected users and roles, update group metadata |
-| `UserDeleted` | User model deleted (via `DispatchesPermissionEvents` trait) | Evict user cache |
+| *(model hook)* | `User::delete()` / `forceDelete()` on a model with `HasRedisPermissions` | Remove the user's rows from both pivots on a hard delete (a soft delete keeps them for `restore()`) |
+| `UserDeleted` | Dispatched by that hook, or manually | Evict user cache, drop the user from the `role:{id}:users` indexes |
 | `Login` | A configured user model logs in (if `warm_on_login` enabled) | Warm user cache |
 
-To auto-dispatch `UserDeleted`, add the trait to your User model:
-
-```php
-use Scabarcas\LaravelPermissionsRedis\Traits\DispatchesPermissionEvents;
-
-class User extends Authenticatable
-{
-    use HasRedisPermissions, DispatchesPermissionEvents;
-}
-```
+Deletion needs no extra trait: `HasRedisPermissions` detaches the user's roles and permissions on a hard delete, keeps them on a soft delete, and dispatches `UserDeleted` in both cases. If you dispatch `UserDeleted` from your own `deleted` hook, remove it: both together fire the event twice. Mass deletes through the query builder (`User::where(...)->delete()`) fire no model events, as everywhere in Eloquent, so they leave both the rows and the cache behind; delete through the models when you need the cleanup, or dispatch `UserDeleted` yourself (see [Events](#events)). The `DispatchesPermissionEvents` trait from earlier versions is deprecated and does nothing next to `HasRedisPermissions`; remove it at your convenience.
 
 #### Rate-limited cache-miss warming
 
@@ -1097,6 +1116,8 @@ $user->syncPermissions(['reports.view']);       // array form works too
 | `scopeRole` | `scopeRole($query, mixed $roles, ?string $guard = null)` | `Builder` | Filter users by role |
 | `scopePermission` | `scopePermission($query, mixed $permissions, ?string $guard = null)` | `Builder` | Filter users by permission (direct or via role) |
 
+Both relations filter and write the pivot's `model_type` with the model's class name, or with its morph alias when `use_morph_map` is on (see [Morph Maps](#morph-maps)).
+
 ```php
 User::role('admin')->get();             // all admins
 User::role(['admin', 'editor'])->get(); // users with admin OR editor
@@ -1190,7 +1211,7 @@ try {
 | `PermissionsAssigned` | `Model $user` | `givePermissionTo()`, `revokePermissionTo()`, `syncPermissions()` on a user | Rewarms user cache |
 | `PermissionsSynced` | `Model $role` | `$role->syncPermissions()`, `givePermissionTo()`, `revokePermissionTo()` | Rewarms role + all users with that role |
 | `RoleDeleted` | `int $roleId`, `array $affectedUserIds` | `Role::delete()` | Evicts role cache + rewarms affected users |
-| `UserDeleted` | `int\|string $userId` | Manually dispatched | Evicts user cache from Redis |
+| `UserDeleted` | `int\|string $userId`, `array $affectedRoleIds = []` | `User::delete()` / `forceDelete()` on a model with `HasRedisPermissions`, or manually | Evicts the user cache and rebuilds the `role:{id}:users` index of each role in `$affectedRoleIds` |
 
 All events are in the `Scabarcas\LaravelPermissionsRedis\Events` namespace and use the `Dispatchable` trait.
 
@@ -1202,12 +1223,16 @@ Event::listen(RolesAssigned::class, function (RolesAssigned $event) {
     Log::info("Roles changed for user {$event->user->id}");
 });
 
-// Manually dispatch UserDeleted when deleting users
+// Mass deletes fire no model events. Either delete through the models,
+// which runs the per-user cleanup...
+User::whereIn('id', $ids)->get()->each->delete();
+
+// ...or evict the cache yourself after a query-builder delete
 use Scabarcas\LaravelPermissionsRedis\Events\UserDeleted;
 
-User::deleted(function (User $user) {
-    event(new UserDeleted($user->id));
-});
+foreach ($ids as $id) {
+    event(new UserDeleted($id));
+}
 ```
 
 ### Artisan Commands
@@ -1343,6 +1368,8 @@ $this->app->singleton(
 | Fluent guard scoping (`forGuard()`) | ❌ | ✅ |
 | `BackedEnum` support for roles/permissions | ✅ | ✅ |
 | UUID / ULID primary keys | ✅ | ✅ |
+| Morph map aliases in `model_type` | ✅ | ✅ (opt-in, `use_morph_map`) |
+| Pivot cleanup when a user is deleted | ✅ | ✅ |
 | **Querying** | | |
 | `hasRole` / `hasAnyRole` / `hasAllRoles` | ✅ | ✅ |
 | `hasPermissionTo` / `hasAnyPermission` / `hasAllPermissions` | ✅ | ✅ |
@@ -1573,6 +1600,8 @@ php artisan permissions-redis:migrate-from-spatie
    ```bash
    php artisan permissions-redis:warm-user {userId}
    ```
+
+4. **`model_type` mismatch.** The warmer only reads pivot rows whose `model_type` is a configured user model: its class name, or its morph alias when `use_morph_map` is on. Rows migrated from Spatie under a morph map carry the alias (`user`), rows written by this package before the option was enabled carry the class name. Compare `SELECT DISTINCT model_type FROM model_has_roles` with the setting, then either flip `use_morph_map` or rewrite the rows (see [Morph Maps](#morph-maps)).
 
 ### Performance degradation
 

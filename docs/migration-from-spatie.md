@@ -87,7 +87,8 @@ This command:
 2. Detects our table names from `config/permissions-redis.php`
 3. If tables differ, copies all data (permissions, roles, pivots) to the new tables
 4. If tables are the same, adds the `description` and `group` columns if missing
-5. Warms the full Redis cache
+5. Warns about `model_type` values it will not read (morph map aliases when `use_morph_map` is off, models missing from `user_model`)
+6. Warms the full Redis cache
 
 **Options:**
 
@@ -95,6 +96,8 @@ This command:
 |--------|-------------|
 | `--dry-run` | Show what would be migrated without making changes |
 | `--no-warm` | Skip Redis cache warming (you can run `permissions-redis:warm` later) |
+
+If your app defines a morph map, set `use_morph_map` to `true` before running the command; see [I use a morph map](#i-use-a-morph-map).
 
 **Example output:**
 
@@ -401,7 +404,7 @@ If you listen to Spatie events, update your listeners to use this package's even
 
 **Spatie** writes `$user->getMorphClass()` into the `model_type` pivot column, so under `Relation::enforceMorphMap(['user' => User::class])` the rows carry the alias `user`.
 
-**This package** (4.x) reads and writes the user model's class name (`App\Models\User`) and the cache warmer filters by the classes listed in `user_model`. Rows that carry an alias are therefore invisible to `roles()`, `hasRole()` and the warm commands until they are rewritten; see the [FAQ entry](#i-use-a-morph-map) for the one-off update.
+**This package** stores the class name (`App\Models\User`) by default. Set `use_morph_map` to `true` and it reads and writes the alias exactly like Spatie, so the rows need no rewrite; do it before running the migration command. With the option off, rows that carry an alias are invisible to `roles()`, `hasRole()` and the warm commands (the migration command warns about them) until they are rewritten; see the [FAQ entry](#i-use-a-morph-map).
 
 ---
 
@@ -432,6 +435,8 @@ If you listen to Spatie events, update your listeners to use this package's even
 | N/A | `wildcard_permissions` | fnmatch() wildcard support |
 | N/A | `octane.reset_on_request` | Octane compatibility |
 | N/A | `model_morph_key_type` | UUID/ULID support |
+| *(always the morph alias)* | `use_morph_map` | `true` matches Spatie; the default `false` stores the class name |
+| N/A | `queue.connection` / `queue.name` | Connection and queue for the warm jobs |
 
 ---
 
@@ -459,7 +464,9 @@ Nothing since v4.1.0: `getDirectPermissions()` and `getPermissionsViaRoles()` ex
 
 ### I use a morph map
 
-If your app calls `Relation::enforceMorphMap()` (or `morphMap()`), Spatie stored the alias in `model_type` and this package expects the class name (see [Behavior differences > Morph maps](#9-morph-maps)). After removing Spatie, rewrite the column once for each configured user model, then warm the cache:
+If your app calls `Relation::enforceMorphMap()` (or `morphMap()`), Spatie stored the alias in `model_type`. Set `use_morph_map` to `true` in `config/permissions-redis.php` (or `PERMISSIONS_REDIS_USE_MORPH_MAP=true`) before running `permissions-redis:migrate-from-spatie`: the package then reads and writes the alias like Spatie does, the rows are used as-is, and both packages can keep coexisting during the migration (see [Behavior differences > Morph maps](#9-morph-maps)).
+
+If you would rather keep the class name in the column (the 4.x default), leave the option off and, after removing Spatie, rewrite the column once for each configured user model, then warm the cache:
 
 ```php
 use App\Models\User;
