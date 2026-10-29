@@ -207,6 +207,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Queue
+    |--------------------------------------------------------------------------
+    |
+    | Connection and queue for the jobs this package dispatches: the
+    | WarmAllCacheJob behind `permissions-redis:warm --queue` and the
+    | WarmUserCacheJob behind `permissions-redis:warm-user --queue`. Null
+    | means the default queue connection and that connection's default
+    | queue. `--queue=connection` still overrides the connection per run.
+    |
+    */
+
+    'queue' => [
+        'connection' => env('PERMISSIONS_REDIS_QUEUE_CONNECTION'),
+        'name'       => env('PERMISSIONS_REDIS_QUEUE'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Model Morph Key Type
     |--------------------------------------------------------------------------
     |

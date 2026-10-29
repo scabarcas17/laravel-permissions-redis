@@ -10,6 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Scabarcas\LaravelPermissionsRedis\Cache\AuthorizationCacheManager;
+use Scabarcas\LaravelPermissionsRedis\Concerns\UsesConfiguredQueue;
 
 class WarmAllCacheJob implements ShouldQueue
 {
@@ -17,10 +18,12 @@ class WarmAllCacheJob implements ShouldQueue
     use InteractsWithQueue;
     use Queueable;
     use SerializesModels;
+    use UsesConfiguredQueue;
 
     public function __construct(
         public readonly bool $flush = true,
     ) {
+        $this->useConfiguredQueue();
     }
 
     public function handle(AuthorizationCacheManager $cacheManager): void

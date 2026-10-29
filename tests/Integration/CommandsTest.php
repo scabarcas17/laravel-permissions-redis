@@ -170,6 +170,56 @@ test('permissions-redis:warm-user --queue=sqs dispatches on given connection', f
     Bus::assertDispatched(WarmUserCacheJob::class, fn (WarmUserCacheJob $job): bool => $job->connection === 'sqs');
 });
 
+test('queued jobs use the connection and queue from config', function () {
+    config()->set('permissions-redis.queue.connection', 'redis');
+    config()->set('permissions-redis.queue.name', 'permissions');
+
+    Bus::fake();
+
+    $this->artisan('permissions-redis:warm --queue')->assertSuccessful();
+    $this->artisan('permissions-redis:warm-user 42 --queue')->assertSuccessful();
+
+    Bus::assertDispatched(
+        WarmAllCacheJob::class,
+        fn (WarmAllCacheJob $job): bool => $job->connection === 'redis' && $job->queue === 'permissions',
+    );
+    Bus::assertDispatched(
+        WarmUserCacheJob::class,
+        fn (WarmUserCacheJob $job): bool => $job->connection === 'redis' && $job->queue === 'permissions',
+    );
+});
+
+test('--queue=connection overrides the configured connection and keeps the configured queue', function () {
+    config()->set('permissions-redis.queue.connection', 'redis');
+    config()->set('permissions-redis.queue.name', 'permissions');
+
+    Bus::fake();
+
+    $this->artisan('permissions-redis:warm --queue=sqs')->assertSuccessful();
+
+    Bus::assertDispatched(
+        WarmAllCacheJob::class,
+        fn (WarmAllCacheJob $job): bool => $job->connection === 'sqs' && $job->queue === 'permissions',
+    );
+});
+
+test('jobs built in application code pick up the queue config too', function () {
+    config()->set('permissions-redis.queue.connection', 'redis');
+    config()->set('permissions-redis.queue.name', 'permissions');
+
+    $job = new WarmUserCacheJob(7);
+
+    expect($job->connection)->toBe('redis')
+        ->and($job->queue)->toBe('permissions');
+});
+
+test('without queue config the jobs carry no connection or queue', function () {
+    $job = new WarmAllCacheJob();
+
+    expect($job->connection)->toBeNull()
+        ->and($job->queue)->toBeNull();
+});
+
 test('WarmUserCacheJob warms the user via AuthorizationCacheManager', function () {
     $user = User::create(['name' => 'John', 'email' => 'john@test.com']);
 
