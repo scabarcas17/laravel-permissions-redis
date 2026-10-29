@@ -366,11 +366,11 @@ $user->getDirectPermissions()->contains('name', 'reports.export');
 
 **Spatie** uses Laravel's Cache facade (configurable: file, database, Redis, etc.).
 
-**This package** uses Redis directly via `illuminate/redis` with custom SET data structures. This provides O(1) membership checks via `SISMEMBER` instead of deserializing cached arrays.
+**This package** uses Redis directly via `illuminate/redis` with custom SET data structures. Each user's roles and permissions are their own SETs, so a request reads only that user's entries (one `SMEMBERS` per set) instead of deserializing the whole cached registry, and answers its checks from memory.
 
 ### 5. In-memory caching
 
-**This package** has an additional in-memory cache layer within the same request. The resolution order is: in-memory, then Redis, then database. This eliminates redundant Redis calls for repeated checks in a single request.
+**This package** keeps what it read for each user in memory for the rest of the request (or queue job). The first check reads the user's sets from Redis, warming them from the database when they are missing; every later check, repeated or not, is answered in memory.
 
 ### 6. getAllPermissions() return type
 
@@ -433,7 +433,7 @@ If you listen to Spatie events, update your listeners to use this package's even
 | N/A | `warm_on_login` | Auto-warm cache on login |
 | N/A | `super_admin_role` | Role that bypasses all checks |
 | N/A | `wildcard_permissions` | fnmatch() wildcard support |
-| N/A | `octane.reset_on_request` | Octane compatibility |
+| N/A | *(automatic)* | Octane: in-memory state resets on every request (`octane.reset_on_request` is ignored since 4.3.0) |
 | N/A | `model_morph_key_type` | UUID/ULID support |
 | *(always the morph alias)* | `use_morph_map` | `true` matches Spatie; the default `false` stores the class name |
 | N/A | `queue.connection` / `queue.name` | Connection and queue for the warm jobs |

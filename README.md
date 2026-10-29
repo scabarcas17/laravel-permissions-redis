@@ -122,7 +122,7 @@ flowchart LR
     DB[("Database\nSource of truth:\npermissions, roles,\nassignments")]
 
     User -- "HTTP requests" --> App
-    App -- "Read: SISMEMBER, SMEMBERS\nWrite: warm / evict" --> Redis
+    App -- "Read: EXISTS, SMEMBERS\nWrite: warm / evict" --> Redis
     App -- "Read/Write:\nrole & permission\ndefinitions" --> DB
 ```
 
@@ -176,21 +176,26 @@ flowchart TB
 flowchart TD
     A["hasPermissionTo('posts.edit')"] --> B{In-memory\ncache?}
     B -- "Hit" --> C["Return cached result"]
-    B -- "Miss" --> D{"Redis\nSISMEMBER?"}
-    D -- "Hit" --> E["Cache in memory\nand return"]
-    D -- "Miss" --> F{"User cache\nexists in Redis?"}
-    F -- "Yes" --> K{"Wildcard\nenabled?"}
+    B -- "Miss" --> D{"User's set read\nin this process?"}
+    D -- "Yes" --> E{"In the set?"}
+    D -- "No" --> F{"User cache\nexists in Redis?"}
+    F -- "Yes" --> G["SMEMBERS:\nread and keep the set"]
     F -- "No (cold start)" --> H["AuthorizationCacheManager\n::warmUser()"]
     H --> I["Query DB:\ndirect perms + role perms"]
     I --> J["Write merged SETs\nto Redis"]
-    J --> D
+    J --> G
+    G --> E
 
+    E -- "Yes" --> N["Return true"]
+    E -- "No" --> K{"Wildcard\nenabled?"}
     K -- "No" --> L["Permission denied"]
-    K -- "Yes" --> M["fnmatch() scan\nall user perms"]
-    M -- "Match" --> N["Return true"]
+    K -- "Yes" --> M["fnmatch() over\nthe same set"]
+    M -- "Match" --> N
     M -- "No match" --> L
 
 ```
+
+The existence check and the read happen once per user and process: a request with 30 distinct checks sends one `EXISTS` and one `SMEMBERS` per set, not a Redis command per check.
 
 ### Cache Invalidation Flow
 
@@ -309,7 +314,7 @@ All options live in `config/permissions-redis.php`:
 | `resolver_cache_limit` | `PERMISSIONS_REDIS_RESOLVER_CACHE_LIMIT` | `1000` | Max users held in each in-memory resolver cache before the oldest entries are evicted |
 | `resolver_warm_cooldown` | `PERMISSIONS_REDIS_RESOLVER_WARM_COOLDOWN` | `1.0` | Seconds before a failed cache-miss warm is retried for the same user |
 | `tenancy.enabled` / `tenancy.resolver` | `PERMISSIONS_REDIS_TENANCY_ENABLED` / `PERMISSIONS_REDIS_TENANCY_RESOLVER` | `false` / `null` | Per-tenant key isolation, see [Multi-Tenancy](#multi-tenancy) |
-| `octane.reset_on_request` | `PERMISSIONS_REDIS_OCTANE_RESET` | `false` | Reset in-memory state per Octane request, see [Laravel Octane](#laravel-octane) |
+| `octane.reset_on_request` | `PERMISSIONS_REDIS_OCTANE_RESET` | `false` | Ignored since 4.3.0: the reset always runs under Octane, see [Laravel Octane](#laravel-octane). Removed in 5.0 |
 | `queue.connection` / `queue.name` | `PERMISSIONS_REDIS_QUEUE_CONNECTION` / `PERMISSIONS_REDIS_QUEUE` | `null` / `null` | Connection and queue for the warm jobs (`null` = defaults), see [Artisan Commands](#artisan-commands) |
 | `model_morph_key_type` | `PERMISSIONS_REDIS_MORPH_KEY_TYPE` | `'int'` | `model_id` column type: `int`, `uuid` or `ulid` |
 | `use_morph_map` | `PERMISSIONS_REDIS_USE_MORPH_MAP` | `false` | Store the morph alias instead of the class name in `model_type`, see [Morph Maps](#morph-maps) |
@@ -696,7 +701,7 @@ php artisan permissions-redis:warm-user 42 --queue
 
 #### Queue workers
 
-The resolver keeps an in-memory copy of the answers it has already given, which is what makes repeated checks in one request free. A `queue:work` process keeps the container (and that memory) alive across jobs, so the package resets it before every job (`Illuminate\Queue\Events\JobProcessing`), the same reset Octane gets per request. Redis stays warm; nothing to configure.
+The resolver keeps an in-memory copy of each user's roles and permissions once it has read them from Redis, which is what makes every check after the first one free. A `queue:work` process keeps the container (and that memory) alive across jobs, so the package resets it before every job (`Illuminate\Queue\Events\JobProcessing`), the same reset Octane gets per request. Redis stays warm; nothing to configure.
 
 #### Programmatic Access
 
@@ -804,29 +809,16 @@ $user->hasPermissionTo('posts.create'); // true
 
 ## Laravel Octane
 
-When running under [Laravel Octane](https://laravel.com/docs/octane), singletons persist across requests. This package provides built-in support to flush in-memory caches between requests, preventing stale permission data from leaking.
+When running under [Laravel Octane](https://laravel.com/docs/octane), singletons persist across requests. The resolver answers from what it read for each user, so a worker that kept that memory would keep its first read of every user it served, permissions revoked by other workers included. The package resets it at the start of every Octane request; there is nothing to configure.
 
-### Setup
-
-```env
-PERMISSIONS_REDIS_OCTANE_RESET=true
-```
-
-Or in your config:
-
-```php
-// config/permissions-redis.php
-'octane' => [
-    'reset_on_request' => true,
-],
-```
-
-When enabled, the package listens to `RequestReceived` and automatically:
-1. Flushes the `PermissionResolver` in-memory caches (permission, role, super admin, warm cooldowns)
+On every `RequestReceived` the package:
+1. Flushes the `PermissionResolver` in-memory caches (each user's sets and answers, super admin flags, warm cooldowns)
 2. Resets the `RedisPermissionRepository` cached connection, prefix, and TTL
 3. Clears the role id => name memo and the role rewarm cooldowns
 
-This ensures each Octane request starts with a clean state while still benefiting from Redis-level caching. Queue workers get the same reset before every job without any configuration (see [Queue workers](#queue-workers)).
+Redis stays warm, so a request pays a few Redis commands for each user it checks (one `EXISTS`, one `SMEMBERS` per set). Queue workers get the same reset before every job (see [Queue workers](#queue-workers)).
+
+Up to 4.2.0 the reset was opt-in through `octane.reset_on_request` (`PERMISSIONS_REDIS_OCTANE_RESET`). The option is ignored since 4.3.0 and goes away in 5.0; you can delete it from your published config.
 
 ---
 
@@ -1378,7 +1370,7 @@ $this->app->singleton(
 | Query scopes (`scopeRole`, `scopePermission`) | ✅ | ✅ |
 | **Cache** | | |
 | Cache backend | Laravel Cache (any driver) | Redis directly (SET structures) |
-| Permission check complexity | O(n) array scan | O(1) `SISMEMBER` |
+| Permission check complexity | O(n) array scan | O(1) lookup in the user's set, read once per request |
 | In-memory request cache | ❌ | ✅ |
 | Automatic cache invalidation | Forget all on change | Surgical warm per user/role |
 | Cache warm on login | ❌ | ✅ |
@@ -1444,7 +1436,7 @@ On **MySQL over TCP** (a realistic networked database; numbers are noisy across 
 |--------|---------------------------|---------------------------|
 | **What's cached globally** | Permission/role registry (in the Cache store) | Same data, denormalized into per-user/per-role Redis SETs |
 | **Per-user resolution** | Lazy-loads the user's role/permission relations from the DB each request | Reads the resolved per-user set from Redis |
-| **Permission check** | In-memory check once the relations are loaded | `SISMEMBER` against a Redis SET, then in-memory for the rest of the request |
+| **Permission check** | In-memory check once the relations are loaded | One `SMEMBERS` per set on the first check, then in-memory for the rest of the request |
 | **Invalidation** | `forgetCachedPermissions()` drops the whole registry cache | Surgical: rewarms only the affected user/role |
 | **After a change** | Next requests rebuild the registry from the DB | Other users' caches are untouched |
 
@@ -1562,9 +1554,9 @@ php artisan permissions-redis:migrate-from-spatie
    php artisan permissions-redis:warm-user {userId}
    ```
 
-4. For Octane users, ensure `reset_on_request` is enabled so in-memory caches don't persist across requests:
-   ```env
-   PERMISSIONS_REDIS_OCTANE_RESET=true
+4. In a long-running process of your own (a daemon command, a custom worker loop), flush the resolver between units of work; Octane requests and queue jobs do it on their own:
+   ```php
+   app(\Scabarcas\LaravelPermissionsRedis\Contracts\PermissionResolverInterface::class)->flush();
    ```
 
 ### Permissions not detected after assignment
